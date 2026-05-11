@@ -1,0 +1,18 @@
+# D-NeRF synthetic scene with strong articulation. Use as the headline
+# articulation ablation row.
+
+scene:
+  name: jumpingjacks
+  dataset_root: data/dnerf/jumpingjacks
+
+# Slightly stronger joint slack for highly articulated motion.
+articulation:
+  lambda_intra: 1.0
+  lambda_inter: 0.10
+  static_label: -1
+
+# D-NeRF clips are short; pull milestones inward.
+frequency_curriculum:
+  num_bands: 6
+  milestones: [0, 3000, 8000]
+  k_at_milestone: [2, 4, 6]
