@@ -1,7 +1,9 @@
 # Experiment Design — MotionPrior-4DGS
 
-> Owner: Murphy. Last updated: 2026-05-11.
-> Positioning: articulation-aware ARAP as headline contribution; see [Survey](../../MP_Obsidian_Notes/wiki/research/Image_to_4D_Survey_May2026.md) for landscape and [MotionPrior4DGS wiki page](../../MP_Obsidian_Notes/wiki/research/MotionPrior4DGS.md) for full method.
+> Owner: Murphy. Last updated: 2026-05-12 (Option C: VGM-supervised articulation-aware 4DGS from single image; VWM perception module framing).
+> Positioning: articulation × video-diffusion-supervision × single-image input. See [`docs/vwm_framing.md`](vwm_framing.md), [Survey](../../MP_Obsidian_Notes/wiki/research/Image_to_4D_Survey_May2026.md), [MotionPrior4DGS wiki](../../MP_Obsidian_Notes/wiki/research/MotionPrior4DGS.md).
+
+> **[2026-05-12 update]** Articulation-cluster audit found that RigGS (CVPR 2025) already does ARAP + articulated + monocular video; VideoArtGS (Sep 2025) does articulated monocular 4D with hybrid center-grid parts. Surviving novelty is the intersection: articulation + diffusion supervision + single-image input. Baseline list updated; experiment matrix below adds RigGS as a critical comparison.
 
 ---
 
@@ -149,14 +151,19 @@ A piecewise-rigid joint produces smooth angular trajectories (smoothness → 1).
 
 ## 8. Baselines — implementation plan
 
-| Baseline | Source | Effort | Owner |
-|---|---|---|---|
-| SC-GS default | github.com/yihua7/SC-GS | install, run with config — ~½ day | Member B |
-| MoSca | github.com/JiahuiLei/MoSca | install, run on D-NeRF + DyCheck — ~1 day | Member B |
-| Shape of Motion | github.com/vye16/shape-of-motion | install, run — ~½ day | Member B |
-| ViDAR | github.com/vidar-4d/ViDAR | install, DyCheck reproduction — ~2 days | Member B |
-| 4D-Fly | TBD whether code released | optional, skip if blocked | — |
-| USplat4D | TBD whether code released | optional, skip if blocked | — |
+| Baseline | Source | Effort | Owner | Required? |
+|---|---|---|---|---|
+| SC-GS default | github.com/yihua7/SC-GS | install, run with config — ~½ day | Member B | yes |
+| **RigGS** (CVPR 2025) — articulation comparator | search arxiv 2503.16822 for code | ~2 days; if no code, cite their published D-NeRF PSNR 40.82 | Member B | **yes — direct articulation competitor** |
+| MoSca | github.com/JiahuiLei/MoSca | install, run on D-NeRF + DyCheck — ~1 day | Member B | yes |
+| Shape of Motion | github.com/vye16/shape-of-motion | install, run — ~½ day | Member B | yes |
+| ViDAR | github.com/vidar-4d/ViDAR | install, DyCheck reproduction — ~2 days | Member B | yes — direct diffusion-supervision competitor |
+| DIFF4SPLAT | TBD (CVPR 2026; check release) | ~1 day if code; else cite | Member B | yes — single-image-input competitor |
+| VideoArtGS | TBD | optional; PartNet-Mobility protocol differs | — | no |
+| 4D-Fly | TBD | optional, skip if blocked | — | no |
+| USplat4D | TBD (ICLR 2026; check release) | optional, skip if blocked | — | no |
+
+The new mandatory: **RigGS**. Without RigGS as a baseline, our articulation claim is not supportable — they did articulation + monocular video + ARAP before us. Get their D-NeRF numbers (published, not reproduced) at minimum.
 
 If any baseline reproduction blocks for >3 days, switch to reporting their *published* numbers and label as "ours numbers vs paper-reported." Reviewers accept this if the dataset/metric protocol is the same.
 
@@ -177,11 +184,13 @@ If any baseline reproduction blocks for >3 days, switch to reporting their *publ
 
 ## 10. Decisions still open (block W1 start)
 
-1. **Front-end input**: monocular video (assumed in this doc) vs single-image + SV4D 2.0. Lean: monocular video for simplicity and ViDAR direct comparison. Decide by EOD 2026-05-12.
-2. **D-NeRF input mode**: full multi-view rendered video (uses all cameras), or first-camera-only (simulates monocular)? The "fair vs ViDAR" choice is monocular. The "fair vs SC-GS" choice is multi-view. Decide alongside #1.
-3. **Floater margin X**: settle in W1 day 1 (look at a few SC-GS-default renders, pick a sane threshold).
-4. **wandb vs tensorboard** for experiment tracking: wandb (recommended; better team viewing).
-5. **Adjacency for inter-part angular consistency metric**: how to derive (k, k') adjacency? Options: (a) all pairs; (b) skeleton-based (D-NeRF has it); (c) spatial-proximity-based. Default (c) for generality, override with (b) when GT skeleton is available.
+1. **Front-end input** — **DECIDED 2026-05-12**: single-image input + VGM front-end (Option C). Primary VGM: SV4D 2.0 (commercial license, multi-view-aware). Fallback: Wan-2.2 I2V. The articulation × diffusion-supervision × single-image intersection is the surviving novelty after the audit.
+2. **D-NeRF input mode**: use the GT first frame as the static input; run SV4D 2.0 to generate the supervision video; held-out novel-view + novel-time evaluation against D-NeRF's GT rendering. This matches the single-image-input deployment regime.
+3. **Floater margin X**: settle W1 day 1 (look at a few SC-GS-default renders).
+4. **wandb** for experiment tracking.
+5. **Adjacency for inter-part angular consistency**: spatial-proximity-based by default; skeleton-based when D-NeRF GT skeleton is available.
+6. **Simulator-import demo target**: Genesis (recommended — modern, fast, articulated bodies) or PyBullet (more mature). Pick before W4.
+7. **SV4D 2.0 license terms**: verify commercial / research-only / NeRF-acceptable. If blocked, fall back to Wan-2.2 I2V (Apache-2.0) plus a multi-view step (AnySplat does the lifting).
 
 ---
 

@@ -1,20 +1,32 @@
 # MotionPrior-4DGS
 
-Physics-constrained deformable 4D Gaussian Splatting from a single static image, supervised by a video generative model. Selectively trusts the video prior — gates physically implausible frames before they enter the photometric gradient, applies a frequency-domain curriculum during deformation MLP training, and uses an articulation-aware ARAP regularizer for piecewise-rigid structure.
+**Articulation-aware video-diffusion-supervised 4D Gaussian Splatting from a single image — a perception module for visual world models.**
 
-> Status: bootstrap complete (2026-05-11). Components implemented and CPU-tested: gating, frequency curriculum, articulation-aware ARAP, rest-state L2, ARAP-prior precomputation, part-label assignment. Next: SC-GS hook + Wan-2.2/AnySplat front-end on H100.
+A robot in the wild has one photograph, not a captured video, not a multi-view rig. To reason about articulated objects (cabinet doors, robot arms, hinged tools, limbs) it needs a 4D scene representation that preserves piecewise-rigid kinematic structure. Existing single-image-input 4D methods (ViDAR, 4D-Fly, DIFF4SPLAT, CAT4D) smear joints into elastic bends; existing articulation-aware 4D methods (RigGS, VideoArtGS, Part2GS) require real captured video. We close that gap. See [`docs/vwm_framing.md`](docs/vwm_framing.md) for the full positioning.
+
+> Status: bootstrap complete (2026-05-11). Articulation novelty audit + Option C repositioning (VGM back, single-image input, VWM-native) completed 2026-05-12. Components implemented and CPU-tested: gating, frequency curriculum, articulation-aware ARAP, rest-state L2, ARAP-prior precomputation, part-label assignment, SC-GS hook, training entry. Next: VGM front-end (SV4D 2.0) + SC-GS reproduction on H100.
 
 ## Pipeline
 
 ```
-Static Image
-   -> Wan-2.2 I2V (image-to-video diffusion)
-   -> AnySplat (feed-forward 3DGS + camera pose)
-   -> SC-GS deformation MLP, trained with:
-       * physically-gated photometric loss
-       * frequency-domain curriculum
-       * articulation-aware ARAP
-       * rest-state L2 anchor
+Static input image
+   ↓
+[SV4D 2.0  or  Wan-2.2 I2V]    -- video generative model (VGM) front-end
+   ↓
+[AnySplat]                     -- feed-forward canonical 3DGS + camera poses
+   ↓
+[SAM 2 hierarchical masks]     -- part-level segmentation on static input
+   ↓
+[SC-GS deformable backbone + MotionPriorHook]
+   ├─ articulation-aware ARAP   (per-edge λ_intra / λ_inter from SAM 2 part labels)
+   ├─ supervision gating        (per-frame weight from offline ARAP-prior energy)
+   ├─ frequency curriculum      (Fourier-band mask on temporal PE)
+   └─ rest-state L2 anchor      (small, fixed weight)
+   ↓
+Output: 4DGS with kinematically-structured deformation field
+   ↓
+Downstream VWM consumer:        physics simulator import (Genesis / PyBullet / MuJoCo)
+                                for IK, contact, articulated manipulation policy
 ```
 
 ## Repository layout
