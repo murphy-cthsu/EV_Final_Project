@@ -89,18 +89,33 @@ A piecewise-rigid joint produces smooth angular trajectories (smoothness → 1).
 
 ---
 
-## 5. Compute budget
+## 5. Compute budget — two-tier (2026-05-12 update)
 
-| Resource | Spend | Where |
+**Lab A4500 × 3 server** (free; default for dev + W1/W2):
+
+| Workload | Estimate |
+|---|---|
+| Day-1 setup + SC-GS smoke + patch verification | ~4 hr (interactive) |
+| W1: jumpingjacks ablation gate (rows 1, 5, 9 × 1 scene) | ~6 hr (3 runs × 2 hr) |
+| W2: D-NeRF articulated subset (rows 1, 5, 6, 7, 8, 9, 10 × 4 scenes = 28 runs) | ~56 hr wall clock (run 3 in parallel across 3 cards → ~20 hr) |
+| Baseline reproductions: RigGS, MoSca, Shape of Motion on D-NeRF | ~12 hr total |
+| **Lab total** | **~50 hr active wall time, free** |
+
+**RunPod H100** (rented; W3-W4 scaling):
+
+| Workload | Estimate | $ |
 |---|---|---|
-| H100 hours | ~240 | Main ablation table (120 runs × 2 hr) |
-| H100 hours | ~60 | Baseline reproductions (ViDAR, MoSca on shared scenes) |
-| H100 hours | ~40 | Debugging, failed runs, re-runs |
-| **Total H100** | **~340 hr** | ≈ $680 at RunPod spot pricing |
-| RTX 6000 Ada (if needed) | optional | Wan-2.2 if single-image input is added |
-| Storage | ~200 GB | Datasets + checkpoints + supervision videos |
+| DyCheck + HyperNeRF runs (rows 1, 5, 9 × 12 scenes = 36 runs × 2 hr) | ~72 H100-hr | ~$145 |
+| ViDAR baseline reproduction on DyCheck | ~16 H100-hr | ~$32 |
+| Full ablation completion (rows 6, 7, 8, 10 on real scenes if needed) | ~48 H100-hr | ~$96 |
+| Debug + re-run buffer (~30%) | ~40 H100-hr | ~$80 |
+| **RunPod total** | **~176 H100-hr** | **~$355** |
 
-**Headroom:** budgeting 30% buffer. If we go over, drop HyperNeRF or DAVIS first.
+**Combined: ~$355 cash + ~50 hr lab box time**, vs. ~$680 if RunPod were the default. The lab box pays for the dev phase entirely.
+
+Storage: ~200 GB on lab box (datasets + per-run checkpoints + supervision videos); ~50 GB on RunPod (W3-W4 outputs only).
+
+**Headroom:** budgeting 30% buffer on RunPod. If we go over, drop HyperNeRF or DAVIS first.
 
 ---
 
@@ -108,10 +123,10 @@ A piecewise-rigid joint produces smooth angular trajectories (smoothness → 1).
 
 | Week | Goal | Gate |
 |---|---|---|
-| **W1 (2026-05-12 to 2026-05-18)** | SC-GS reproduced on D-NeRF; articulation ARAP plugged in; first jumpingjacks run | Row 1 vs Row 5 result on jumpingjacks |
-| **W2 (2026-05-19 to 2026-05-25)** | Gating + curriculum + rest-state hooked; full ablation matrix on D-NeRF synth | Rows 5–10 on all 8 D-NeRF scenes |
-| **W3 (2026-05-26 to 2026-06-01)** | DyCheck pipeline; ViDAR baseline reproduction; ours vs ViDAR head-to-head | Row 9 vs Row 4 numbers on DyCheck |
-| **W4 (2026-06-02 to 2026-06-08)** | HyperNeRF extension; writing; figures; final ablation polish | Submission-ready draft |
+| **W1 (2026-05-12 to 2026-05-18)** — **Lab A4500** | SC-GS reproduced; articulation ARAP plugged in; first jumpingjacks run | Row 1 vs Row 5 on jumpingjacks (free iteration; cheap to re-run) |
+| **W2 (2026-05-19 to 2026-05-25)** — **Lab A4500** | Gating + curriculum + rest-state hooked; full D-NeRF ablation matrix; RigGS/MoSca/SoM baselines | Rows 5-10 on all 8 D-NeRF scenes (~50 lab-hr; 3-way parallel on the 3 cards) |
+| **W3 (2026-05-26 to 2026-06-01)** — **RunPod H100** | DyCheck pipeline; ViDAR head-to-head; simulator-import demo (Genesis/PyBullet) | Row 9 vs Row 4 on DyCheck; URDF runs in Genesis IK probe |
+| **W4 (2026-06-02 to 2026-06-08)** — **Mix** | HyperNeRF extension; writing; figures; final ablation polish | Submission-ready draft |
 
 **Scope-cut decisions baked in:**
 - If articulation ARAP underperforms uniform ARAP on jumpingjacks by end of W1: pivot to Option B (single-image + DIFF4SPLAT comparison) or Option C (refinement-of-feed-forward).

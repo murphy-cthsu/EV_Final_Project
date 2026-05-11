@@ -1,8 +1,21 @@
-# Handoff — MotionPrior-4DGS, GPU pod session
+# Handoff — MotionPrior-4DGS, GPU session
 
-> Cold-start guide for a fresh Claude Code session running on the GPU pod
-> (3 × NVIDIA A4500, 20 GB VRAM each). Read top to bottom; everything you
-> need is here or linked. Last updated: 2026-05-12.
+> Cold-start guide for a fresh Claude Code session running on GPU hardware.
+> Read top to bottom; everything you need is here or linked.
+> Last updated: 2026-05-12.
+
+## 0. Two-tier GPU workflow
+
+The project uses two distinct GPU environments. Match the work to the right one:
+
+| Environment | Use for | Cost |
+|---|---|---|
+| **Lab A4500 × 3** (60 GB total, default dev box) | Day-1 setup, SC-GS smoke, all four hook components, single-scene experiments, W1/W2 ablation rows, baseline reproductions (RigGS, MoSca, Shape of Motion), iteration on the patch file | Free (lab infra) |
+| **RunPod H100** (80 GB single card, rented) | W3/W4 full ablation sweep at scale, longer training runs, large-VRAM VGM at higher resolution, final paper-quality results | ~$2/hr (rented as needed) |
+
+**Default to the lab box.** Move to RunPod only when (a) a run blocks for >12 hours of A4500 time, or (b) you need to parallelize 4+ runs simultaneously and the lab is contended. The first 2 weeks of `docs/experiments.md` are entirely doable on the lab box.
+
+**Same setup script** works on both — `scripts/setup_runpod.sh` (badly named; works on any Ubuntu+CUDA GPU box including the lab one). Don't be surprised the name says "runpod"; rename it later if it bothers you.
 
 ## 1. The project in three sentences
 
@@ -36,28 +49,34 @@ For the full positioning argument: `docs/vwm_framing.md`. For the experiment pla
 
 **Total: 95+ tests passing on CPU** as of 2026-05-12.
 
-## 3. Hardware notes for 3 × A4500 (20 GB each)
+## 3. Hardware notes
 
-20 GB per card constrains which models fit:
+### Lab A4500 × 3 (default dev box; 60 GB total)
 
-| Model | Single-A4500 fit? | Notes |
+| Model | Single A4500 fit? | Lab box (3 cards) plan |
 |---|---|---|
-| SC-GS training | ✓ yes | ~8 GB peak; comfortable |
-| AnySplat inference | ✓ yes | ~12 GB peak at 100 views |
-| SAM 2 (hiera-large) | ✓ yes | ~6 GB |
-| **SV4D 2.0** | ⚠ probably tight | Stability lists ~24 GB recommended for full-precision. Use fp16/bf16; may need offloading. **Verify on the pod day 1.** |
-| Wan-2.2 I2V-A14B | ⚠ requires multi-GPU or 8-bit | 14B active params * 2 bytes ≈ 28 GB at fp16 → does not fit on 1 × A4500. Need accelerate device_map='auto' across 2 cards, or bitsandbytes 8-bit. |
+| SC-GS training | ✓ yes | GPU 2 (long-running) |
+| AnySplat inference | ✓ yes | GPU 1 |
+| SAM 2 (hiera-large) | ✓ yes (~6 GB) | shares GPU 1 with AnySplat |
+| **SV4D 2.0** at fp16 | ✓ yes (likely; verify day 1) | GPU 0 |
+| **Wan-2.2 I2V-A14B** at fp16 | ✗ single-card; needs 2 cards | GPU 0 + GPU 1 via `accelerate device_map='auto'` (this competes with AnySplat; sequence the pipeline rather than running concurrently) |
 
-**Recommendation**: try SV4D 2.0 first (smaller, multi-view-aware). If it doesn't fit, fall back to **Wan-2.2 with 8-bit quantization across 2 cards**, leaving the 3rd card for SC-GS / SAM 2 / AnySplat.
+Recommended use:
+- **SV4D 2.0 first** (smaller; fp16 fits on one A4500). Keeps the 3-GPU split clean.
+- **Wan-2.2 only if SV4D 2.0 license blocks**. Then run VGM and AnySplat sequentially, not concurrently.
 
-A 3-GPU split that works:
-- GPU 0: SV4D 2.0 (or Wan-2.2 fp16 first stage)
-- GPU 1: AnySplat
-- GPU 2: SC-GS training (this is where the long-running work happens)
+The pipeline is naturally sequential per scene (VGM → AnySplat → SAM 2 → SC-GS), so all four models don't need to be resident simultaneously. The 3 cards just mean we can have 2-3 scenes in different pipeline stages at once.
 
-`scripts/setup_runpod.sh` already creates 3 conda envs (`scgs`, `anysplat`, `sv4d2`) so they can coexist.
+### RunPod H100 (W3-W4 scaling)
 
-## 4. The first day on the pod (W1 of the experiment timeline)
+Single 80 GB H100 fits every model comfortably with no quantization gymnastics. Use it when:
+- Running the full ablation matrix (120+ runs) — 3-way parallelism on the lab box becomes a bottleneck around the 4th simultaneous training run
+- Reproducing ViDAR on DyCheck (their training was done on 8×A100; H100 single-card halves the wall time)
+- Final paper renders + figures
+
+Cost estimate per `docs/experiments.md`: ~$200-300 on RunPod if we use the lab box for W1/W2, vs. ~$680 originally budgeted assuming everything ran on RunPod.
+
+## 4. The first day on the lab A4500 box (W1 of the experiment timeline)
 
 In strict order:
 
@@ -65,7 +84,7 @@ In strict order:
 ```bash
 cd ~/EV_Final_Project   # (after `git clone https://github.com/murphy-cthsu/EV_Final_Project.git`)
 bash scripts/bootstrap_third_party.sh        # clones SC-GS @ 3a9d2ad4, AnySplat @ 5f5e208a
-bash scripts/setup_runpod.sh                 # builds 3 conda envs + installs motionprior
+bash scripts/setup_runpod.sh                 # builds 3 conda envs (name notwithstanding, works on lab box)
 ```
 
 ### 4.2 Verify SC-GS source structure (~30 min)
