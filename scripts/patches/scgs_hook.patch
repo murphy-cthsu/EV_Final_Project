@@ -1,0 +1,81 @@
+# SC-GS hook patches
+#
+# Apply to: third_party/SC-GS @ commit 3a9d2ad4e4fc058b0763d446ae9e6b1be120b872
+# Apply with: (from EV_Final_Project repo root, after bootstrap_third_party.sh)
+#   cd third_party/SC-GS && git apply ../../scripts/patches/scgs_hook.patch
+#
+# Three patch sites in train_gui.py around lines 1085-1180 plus one in
+# scene/deform_model.py to inject MotionPriorHook into the Trainer's setup.
+#
+# IMPORTANT: line numbers below are 2026-05-12 reads of the pinned SHA.
+# Verify with `grep -n` on the pod before applying. If SC-GS bumps SHA,
+# regenerate this patch.
+
+# ---------------------------------------------------------------------------- #
+# Patch site overview (line numbers reflect pinned SHA, verify on pod)         #
+# ---------------------------------------------------------------------------- #
+#
+# (A) BEFORE line 1088 (the `self.deform.step` call inside the 'mlp' branch):
+#     Apply frequency curriculum to time_input via the hook.
+#     Inserts:
+#         time_input = self.motionprior_hook.gate_temporal_encoding(time_input, self.iteration)
+#
+# (B) REPLACE line 1118 (`Ll1 = l1_loss(image, gt_image)`):
+#     Scale by per-frame gating weight from the hook.
+#     Replaces with:
+#         _gate_w = self.motionprior_hook.photometric_gating(fid.item(), self.iteration)
+#         Ll1 = l1_loss(image, gt_image) * _gate_w
+#
+# (C) AFTER line 1123 (`loss = loss + self.deform.reg_loss`):
+#     Add the hook's extra losses (rest-state L2).
+#     Inserts:
+#         loss = loss + self.motionprior_hook.extra_losses(d_xyz, self.iteration)
+#
+# (D) In `Trainer.__init__` (find by `self.deform = self.deform.DeformModel(...)`):
+#     After constructing the deform model, install the ARAP adapter and
+#     attach the hook:
+#         from motionprior.integration.scgs_arap_adapter import install as install_arap
+#         from motionprior.integration import MotionPriorHook
+#         self.motionprior_hook = MotionPriorHook(...)  # config + tensors from CLI
+#         install_arap(self.deform.deform, self.motionprior_hook, node_part_labels=...)
+#
+# The exact line offsets for (D) depend on whether you read the gui Trainer or
+# the headless one. Apply with `git apply --reject` and inspect any .rej files
+# to fix offsets.
+
+# ---------------------------------------------------------------------------- #
+# Unified diff (regenerate after final read on pod)                            #
+# ---------------------------------------------------------------------------- #
+#
+# To regenerate the diff cleanly:
+#   1. cd third_party/SC-GS
+#   2. Apply the three insertions / replacements manually
+#   3. git diff > ../../scripts/patches/scgs_hook.patch
+#
+# The placeholder diff below mirrors the intent but the byte-exact form must
+# be produced on the pod. The skeleton is sufficient for `git apply --check`
+# to fail loudly if upstream drifts, signaling we need to regenerate.
+
+diff --git a/train_gui.py b/train_gui.py
+--- a/train_gui.py
++++ b/train_gui.py
+@@ -1086,6 +1086,8 @@
+                 N = self.gaussians.get_xyz.shape[0]
+                 time_input = fid.unsqueeze(0).expand(N, -1)
++                # MotionPrior hook (A): frequency curriculum on temporal PE
++                time_input = self.motionprior_hook.gate_temporal_encoding(time_input, self.iteration)
+                 ast_noise = 0 if self.dataset.is_blender else torch.randn(1, 1, device='cuda').expand(N, -1) * time_interval * self.smooth_term(self.iteration)
+                 d_values = self.deform.step(self.gaussians.get_xyz.detach(), time_input + ast_noise, iteration=self.iteration, feature=self.gaussians.feature, camera_center=viewpoint_cam.camera_center)
+                 d_xyz, d_rotation, d_scaling, d_opacity, d_color = d_values['d_xyz'], d_values['d_rotation'], d_values['d_scaling'], d_values['d_opacity'], d_values['d_color']
+@@ -1118,7 +1120,9 @@
+-        Ll1 = l1_loss(image, gt_image)
++        # MotionPrior hook (B): photometric gating from offline ARAP-prior energy
++        _gate_w = self.motionprior_hook.photometric_gating(float(fid.item()), self.iteration)
++        Ll1 = l1_loss(image, gt_image) * _gate_w
+         loss_img = (1.0 - self.opt.lambda_dssim) * Ll1 + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+         loss = loss_img
+
+         if self.iteration > self.opt.warm_up:
+             loss = loss + self.deform.reg_loss
++        # MotionPrior hook (C): rest-state L2 anchor
++        loss = loss + self.motionprior_hook.extra_losses(d_xyz, self.iteration)

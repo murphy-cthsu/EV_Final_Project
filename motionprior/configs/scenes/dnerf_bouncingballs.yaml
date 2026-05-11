@@ -1,0 +1,62 @@
+# D-NeRF: bouncingballs (multiple rigid balls -> each is its own "part")
+# Discrete rigid body parts; little intra-part deformation.
+# Useful for validating that piecewise-rigid ARAP doesn't over-constrain when
+# the natural motion is purely rigid translation.
+
+scene:
+  name: bouncingballs
+  dataset_root: data/dnerf/bouncingballs
+  type: dnerf_synthetic
+  fps: 30
+
+vgm:
+  backend: sv4d2
+  num_frames: 60
+  input_frame_index: 0
+  cfg_scale: 7.5
+
+# Bouncing balls -> rigid translations only -> very tight intra-part, very
+# slack inter-part (each ball is its own rigid object)
+articulation:
+  lambda_intra: 2.0       # tighter -- balls are fully rigid
+  lambda_inter: 0.01      # near-zero -- balls don't interact
+  static_label: -1
+  enabled: true
+  sam2:
+    hierarchical: false   # flat segmentation: one mask per ball
+    max_parts: 8
+    confidence_threshold: 0.7
+
+frequency_curriculum:
+  num_bands: 6
+  # Bouncing motion is mostly low-frequency (parabolic) -> can unlock faster
+  milestones: [0, 2000, 6000]
+  k_at_milestone: [2, 4, 6]
+  enabled: true
+
+gating:
+  alpha0: 1.0
+  ema_momentum: 0.99
+  eps: 1.0e-6
+  enabled: true
+
+rest_state:
+  eta: 0.001
+  enabled: true
+
+loss_weights:
+  photometric: 1.0
+  arap: 1.0
+  rest_state: 1.0
+
+training:
+  iterations: 30000
+  batch_frames: 4
+  log_every: 100
+  warm_up: 3000
+
+eval:
+  novel_view_split: holdout
+  novel_time_split: holdout
+  metrics: [psnr, ssim, lpips, inter_part_angular_consistency, floater_count]
+  inter_part_pair_strategy: spatial_proximity
