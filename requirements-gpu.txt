@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2+cu121
+torchvision==0.16.2+cu121
+numpy>=1.24,<2.0
+pyyaml>=6.0
+pytest>=7
+opencv-python-headless>=4.9
+imageio>=2.34
+imageio-ffmpeg>=0.4.9
+einops>=0.7
+transformers>=4.40
+accelerate>=0.28
+huggingface_hub>=0.22
