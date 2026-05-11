@@ -117,13 +117,26 @@ if [ -d third_party/SC-GS ] && [ -f third_party/SC-GS/requirements.txt ]; then
         conda create -y -n scgs python=3.10 > /dev/null
     fi
     conda activate scgs
+    # Build toolchain inside the env so we don't need sudo on the lab box.
+    # cmake + ninja for the CUDA extension builds; conda-forge gives us
+    # a recent cmake without touching the system.
+    echo "[setup] installing build toolchain (cmake, ninja) into scgs env..."
+    conda install -y -n scgs -c conda-forge cmake ninja > /dev/null
+    # Sanity-check that gcc/g++ are available (system-level; cannot install
+    # without sudo). If missing, the CUDA extension build will fail.
+    if ! command -v gcc > /dev/null; then
+        echo "[setup] WARN: gcc not found on PATH. The scgs CUDA extensions"
+        echo "        (diff-gaussian-rasterization, simple-knn) need a system C/C++"
+        echo "        compiler. Ask sysadmin to install build-essential, OR try:"
+        echo "        conda install -n scgs -c conda-forge gxx_linux-64=11"
+    fi
     echo "[setup] installing PyTorch 2.1.2+cu121 in scgs env..."
     pip install -q torch==2.1.2 torchvision==0.16.2 \
         --extra-index-url https://download.pytorch.org/whl/cu121
     echo "[setup] installing SC-GS requirements..."
     pip install -q -r third_party/SC-GS/requirements.txt
     # Two CUDA extensions: diff-gaussian-rasterization + simple-knn.
-    # Need nvcc. If the build fails (no CUDA toolkit, or older driver),
+    # Need nvcc + gcc. If the build fails (no CUDA toolkit, or older driver),
     # warn but continue so the user can still pytest motionprior.
     for ext in diff-gaussian-rasterization simple-knn; do
         ext_dir="third_party/SC-GS/submodules/${ext}"
