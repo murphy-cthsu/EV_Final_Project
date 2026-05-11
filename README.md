@@ -2,7 +2,7 @@
 
 Physics-constrained deformable 4D Gaussian Splatting from a single static image, supervised by a video generative model. Selectively trusts the video prior — gates physically implausible frames before they enter the photometric gradient, applies a frequency-domain curriculum during deformation MLP training, and uses an articulation-aware ARAP regularizer for piecewise-rigid structure.
 
-> Status: under active development. Target submission: ICCV 2026 / 3DV 2026.
+> Status: bootstrap complete (2026-05-11). Components implemented and CPU-tested: gating, frequency curriculum, articulation-aware ARAP, rest-state L2, ARAP-prior precomputation, part-label assignment. Next: SC-GS hook + Wan-2.2/AnySplat front-end on H100.
 
 ## Pipeline
 
