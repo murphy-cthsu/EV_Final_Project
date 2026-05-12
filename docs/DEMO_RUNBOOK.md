@@ -110,13 +110,24 @@ cat docs/scgs_hook_design.md | sed -n '1,60p'
 
 The hook degrades gracefully — `--ablation scgs_default` is the no-op path and was verified to match the baseline.
 
-## 7. "If someone challenges the failure claim"
+## 7. "If someone challenges the failure claim or the contribution"
 
-Section 3 of `PROGRESS_2026-05-12.md` is the prepared response. Key points to remember:
-- D-NeRF is *not* the ill-posedness benchmark. It's the controlled comparison benchmark.
-- Multi-view D-NeRF SC-GS-default is a *lower bound* on the failure severity, not an upper bound.
-- The discriminating evidence is the W2 ablation matrix (shuffled-labels row + higher-capacity baseline) — not the W1 numbers alone.
-- The deployment regime (SV4D-supervised single-image) is where the failure claim is actually tested. SV4D weights are downloaded; pipeline is W3.
+§1 and §4 of `PROGRESS_2026-05-12.md` are the prepared responses. The key reframings:
+
+**On the contribution itself:**
+- The claim is a **3-component joint system**, not "better ARAP."
+- **Component 1** (SAM-2 piecewise-rigid ARAP) *directly* improves articulation. **Components 2 and 3** (ARAP-energy gating, frequency curriculum) are *protective* against generative-supervision drift — they keep Component 1's signal from being corrupted by hallucinated frames.
+- The novelty is the intersection. RigGS does Component 1 alone but only because their supervision is clean captured video. The diffusion-supervised cluster has no drift-rejection mechanism. We deliver Component 1 in a regime where it would otherwise collapse.
+
+**On the W1 evidence:**
+- D-NeRF is *not* the ill-posedness benchmark — it's the **Tier 1 controlled-comparison benchmark**. SC-GS-default's 40.85 PSNR there is *not* a failure number; the failure shows up in the **structured spatial residual** (×2.28 periphery ratio, 5–6× radial ramp) that scales with articulation complexity.
+- Multi-view D-NeRF is the *easiest possible supervision regime* — a lower bound on the failure under SV4D-supervised inputs.
+- **Tier 1 measures Component 1 only.** Components 2 and 3 are dormant under clean supervision (no drift to gate against). The bigger headline numbers come from Tier 2 (SV4D-supervised D-NeRF) where the joint system activates.
+- Discriminating evidence for "Component 1 is *the* fix" lives in the Tier 1 ablation matrix (shuffled-labels row + higher-capacity baseline). W1 numbers alone are suggestive, not causal.
+
+**On dataset choice (D-NeRF "too simple"):**
+- D-NeRF's uniqueness is the **clean evaluation oracle**, not easy supervision. Under SV4D supervision (Tier 2), D-NeRF becomes genuinely ill-posed (5 azimuths vs 100 cameras, drifty content) while keeping the held-out test cams as a fair oracle. Best of both worlds; DyCheck cannot match that.
+- DyCheck (Tier 3) is the real-world existence proof, not the controlled comparison.
 
 ## 8. "Reset and re-run everything from disk if something breaks"
 

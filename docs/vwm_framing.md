@@ -119,3 +119,27 @@ Our contribution slots into the perception layer ahead of any of these dynamics 
 §1.5 — Evaluation: D-NeRF articulated subset + DyCheck + HyperNeRF; inter-part angular consistency + simulator-import demo.
 
 §1.6 — Limitations: per-scene optimization; depends on SAM 2 part quality; provides kinematic not dynamical structure.
+
+---
+
+## Decision log
+
+### 2026-05-12 — Deployment regime reframed to "single short observation"
+
+**Issue.** SV4D 2.0 architecturally requires a 21-frame input video, not a single static image. The original framing in §1.2 above ("single static image, no captured video") is not achievable with SV4D 2.0 alone.
+
+**Routes considered.**
+- (A) Reframe "single observation = one short clip (≤21 frames at 576²)". Keeps the spirit of the deployment argument — embodied agents observing for ~1 second satisfies this — without architectural overhaul. **Cost: rhetorical concession.**
+- (B) Insert an image-to-video model (SVD, CogVideoX-I2V, Wan-2.2-I2V) in front of SV4D. **Cost: ~3 days engineering + cascaded generative drift.** The cascaded drift partially overlaps with what Components 2 and 3 of our hook are designed to absorb, so this route also serves as additional empirical justification for the gating + curriculum components.
+
+**Decision.** Ship Route A for the paper. Tag Route B as future work / appendix experiment. Embodied robotics audiences (DreamerV3 / Cosmos / V-JEPA 2 / GAIA-2 lit) routinely treat short observation clips as valid perception input; reviewers in that community will not object to the relaxed framing.
+
+**Implications for the paper.**
+- §1.1 / §1.2 framing language should read "single short observation" rather than "single static image."
+- The deployment-time argument is unchanged — an agent in the wild can produce ≤1 s of camera footage trivially.
+- The contribution table in §3 ("Why articulation specifically is load-bearing") is unchanged.
+- The pipeline diagram in §6 should clarify that the input is `1–21 frames of a single camera trajectory`, not literally one frame.
+
+### 2026-05-12 — Three-component contribution made explicit
+
+The three components named in §3 above (SAM-2-grounded piecewise-rigid ARAP / ARAP-energy gating / frequency-domain curriculum) are not independently novel; the diffusion-supervised cluster has each piece in isolation. The novelty is the **intersection** — specifically, Component 1 (articulation) operating in a regime where it would otherwise collapse, with Components 2 and 3 providing the drift-resistance that makes Component 1 viable under generative supervision. The progress report (`docs/PROGRESS_2026-05-12.md` §1) gives the precise component → pathology mapping; intro section §1.4 of the paper should foreground this intersection framing rather than treating the three components as additive contributions.

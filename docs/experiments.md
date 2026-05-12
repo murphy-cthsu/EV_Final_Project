@@ -60,6 +60,20 @@ Rows 1–4 are baselines (off-the-shelf implementations). Rows 5–10 are our me
 
 **Mandatory comparison:** row 9 vs row 4 (Ours vs ViDAR) on DyCheck. This is the head-to-head against the closest prior work.
 
+### Component roles — direct vs protective (2026-05-12 clarification)
+
+Important precision for interpreting the matrix: only one of our three components *directly* improves articulation; the other two are *protective* against generative-supervision drift.
+
+| Component | Row(s) introducing it | Role | Activates under |
+|---|---|---|---|
+| Articulation ARAP (piecewise-rigid) | 5, 9, 10 (off in 10) | **DIRECT** — encodes piecewise rigidity into the deformation field | Any supervision regime |
+| ARAP-energy gating | 6, 8, 9, 10 | **PROTECTIVE** — down-weights physically implausible supervision frames | **Only generative / noisy supervision** (returns uniform weight on clean data) |
+| Frequency curriculum | 7, 8, 9, 10 | **PROTECTIVE** — locks high-freq channels of temporal PE during early training | **Only generative / noisy supervision** (marginal effect under clean data) |
+
+This means rows 6, 7, and 8 are **expected to be no-ops** on multi-view D-NeRF (Tier 1) — the supervision is clean, gating returns uniform weight, curriculum is just slower convergence. Those rows only flex under **SV4D-supervised D-NeRF (Tier 2)** and **DyCheck (Tier 3)**.
+
+Practical implication: reporting rows 6 and 7 separately on Tier 1 mostly wastes compute. The discriminating measurement of Components 2 and 3 is at Tier 2 — rows 8 (gating + curriculum, no articulation) and 9 (full hook) on the SV4D-supervised scenes. Plan compute accordingly: Tier 1 = rows 1, 5, 9 (3 runs/scene); Tier 2 = rows 1, 5, 8, 9 (4 runs/scene); Tier 3 = rows 1, 9 (existence proof).
+
 ---
 
 ## 4. Metrics
