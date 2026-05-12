@@ -48,3 +48,5 @@ echo "third_party/ ready. Next steps:"
 echo "  - SC-GS:    cd third_party/SC-GS    && follow its README to build CUDA extensions"
 echo "  - AnySplat: cd third_party/AnySplat && pip install -r requirements.txt"
 echo "  - Wan-2.2 weights: download from HuggingFace (Wan-AI/Wan2.2-I2V-A14B)"
+
+#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

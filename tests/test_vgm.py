@@ -70,15 +70,43 @@ def test_vgm_protocol_accepts_any_generate_method():
     assert out.shape == (2, 4, 4, 3)
 
 
-def test_sv4d2_adapter_import_fails_gracefully_on_cpu():
-    """The SV4D 2.0 backend lazy-imports heavy GPU deps; on CPU box it should
-    raise an informative ImportError on construction, not at import time."""
+def test_sv4d2_adapter_construction_is_cpu_safe():
+    """Constructor must not require a GPU. It only records parameters and
+    confirms the upstream script is on disk; subprocess launch is deferred
+    until .run() is called."""
+    from motionprior.integration.vgm import SV4D2Adapter, SV4D2_AZIMUTHS_DEG
+    a = SV4D2Adapter(checkpoint="checkpoints/sv4d2.safetensors")
+    assert a.variant == "sv4d2"
+    assert a.n_views == 5
+    assert a.azimuths_deg == SV4D2_AZIMUTHS_DEG["sv4d2"]
+    assert a.n_frames == 21
+
+
+def test_sv4d2_adapter_8views_variant():
     from motionprior.integration.vgm import SV4D2Adapter
-    with pytest.raises(ImportError) as ei:
-        SV4D2Adapter(checkpoint="fake/path")
-    assert "GPU" in str(ei.value) or "diffusers" in str(ei.value).lower() or \
-           "transformers" in str(ei.value).lower() or \
-           "stabilityai" in str(ei.value).lower()
+    a = SV4D2Adapter(
+        checkpoint="checkpoints/sv4d2_8views.safetensors",
+        variant="sv4d2_8views",
+    )
+    assert a.n_views == 9
+    assert a.azimuths_deg[0] == 330.0   # input view at azimuth 330° for 8-view variant
+
+
+def test_sv4d2_adapter_rejects_unknown_variant():
+    from motionprior.integration.vgm import SV4D2Adapter
+    with pytest.raises(ValueError):
+        SV4D2Adapter(checkpoint="fake", variant="sv4d3_made_up")
+
+
+def test_sv4d2_adapter_rejects_short_input_dir(tmp_path):
+    """`.run` validates that the input dir has enough PNGs before launching."""
+    from motionprior.integration.vgm import SV4D2Adapter
+    # only 5 PNGs but adapter wants 21
+    for i in range(5):
+        (tmp_path / f"frame_{i:04d}.png").write_bytes(b"\x89PNG\r\n\x1a\n")  # fake but path exists
+    a = SV4D2Adapter(checkpoint="checkpoints/sv4d2.safetensors", n_frames=21)
+    with pytest.raises(ValueError, match="need"):
+        a.run(input_video_dir=tmp_path, output_dir=tmp_path / "out")
 
 
 def test_wan22_adapter_import_fails_gracefully_on_cpu():

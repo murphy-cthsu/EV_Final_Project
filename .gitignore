@@ -23,12 +23,15 @@ env/
 third_party/SC-GS/
 third_party/AnySplat/
 third_party/Wan2.2/
+third_party/generative-models/
+third_party/sam2/
 
 # Data, weights, outputs
 data/
 checkpoints/
 outputs/
 runs/
+runs_aux/
 wandb/
 *.ckpt
 *.pth
