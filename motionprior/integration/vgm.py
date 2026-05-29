@@ -15,7 +15,7 @@ pseudo-multi-view supervision. Two backends:
 Both backends lazy-import heavyweight GPU deps and call the upstream code
 via subprocess so this module imports cleanly on a CPU dev box.
 
-See docs/sv4d2_api.md for the API reference these wrappers follow.
+See docs/design/sv4d2_api.md for the API reference these wrappers follow.
 """
 
 from __future__ import annotations

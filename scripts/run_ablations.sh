@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full ablation matrix from docs/experiments.md.
+# Run the full ablation matrix from docs/design/experiments.md.
 # Idempotent -- skips runs that already have eval.json under outputs/.
 #
 # Designed to run on either the lab A4500 box or a RunPod H100.
@@ -50,7 +50,7 @@ case "${GROUP}" in
         ;;
 esac
 
-# Ablation rows (matches docs/experiments.md §3)
+# Ablation rows (matches docs/design/experiments.md §3)
 ABLATIONS=(
     scgs_default
     articulation_only

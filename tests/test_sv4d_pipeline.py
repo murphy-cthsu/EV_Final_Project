@@ -9,7 +9,7 @@ test:
   - The driver's fake_sv4d_result() path runs end-to-end on CPU.
 
 The real SV4D inference path is exercised separately on the GPU pod via the
-smoke runbook in docs/sv4d2_api.md.
+smoke runbook in docs/design/sv4d2_api.md.
 """
 
 from __future__ import annotations
