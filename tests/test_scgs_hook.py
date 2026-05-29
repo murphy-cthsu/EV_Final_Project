@@ -61,10 +61,32 @@ def test_gate_temporal_encoding_no_op_when_layout_mismatched():
         edges=torch.tensor([[0, 0]]),
         rest_positions=torch.zeros(1, 3),
     )
-    # 7 channels -> not 2*num_bands; fallback to no-op
+    # 7 channels -> not 2*num_bands, not 1+2*num_bands; fallback to no-op
     time_emb = torch.ones(3, 7)
     out = hook.gate_temporal_encoding(time_emb, iteration=0)
     torch.testing.assert_close(out, time_emb)
+
+
+def test_gate_temporal_encoding_handles_identity_prefixed_layout():
+    """SC-GS / NeRF PE layout: [identity, sin_0, cos_0, sin_1, cos_1, ...]."""
+    hook = MotionPriorHook(
+        config=_minimal_config(),
+        arap_prior_energies=torch.tensor([0.0]),
+        part_labels=torch.tensor([0]),
+        edges=torch.tensor([[0, 0]]),
+        rest_positions=torch.zeros(1, 3),
+    )
+    # 1 (identity) + 4 bands x 2 = 9 channels
+    time_emb = torch.ones(3, 9)
+    # At iteration 0, k_max=1 -> identity passes, only first sin/cos band active
+    out = hook.gate_temporal_encoding(time_emb, iteration=0)
+    assert out.shape == time_emb.shape
+    # identity unchanged
+    assert (out[:, 0] == 1.0).all()
+    # band 0 (sin_0, cos_0) active
+    assert (out[:, 1:3] == 1.0).all()
+    # bands 1, 2, 3 zeroed
+    assert (out[:, 3:] == 0.0).all()
 
 
 def test_gate_temporal_encoding_disabled_returns_input():

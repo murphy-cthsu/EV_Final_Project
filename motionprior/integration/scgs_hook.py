@@ -1,7 +1,7 @@
 """SC-GS integration hook.
 
 The single Python object that wires our four `motionprior` components into
-SC-GS's training loop. See `docs/scgs_hook_design.md` for the contract and
+SC-GS's training loop. See `docs/design/scgs_hook_design.md` for the contract and
 the three patch sites in `train_gui.py`.
 
 Design principle: every method degrades to a no-op (returns identity / 1.0 /
@@ -21,6 +21,11 @@ from motionprior.curriculum.frequency import FrequencyCurriculum
 from motionprior.losses.gating import compute_gating_weights, AdaptiveAlpha
 from motionprior.losses.arap_articulated import articulated_edge_weights
 from motionprior.losses.rest_state import rest_state_l2
+from motionprior.losses.cross_view_consistency import (
+    AdaptiveBeta,
+    build_sibling_map,
+    compute_cross_view_gate,
+)
 
 
 class MotionPriorHook:
@@ -49,9 +54,15 @@ class MotionPriorHook:
         # of the config; missing subsections default to disabled.
         self._curriculum = self._build_curriculum()
         self._adaptive_alpha = self._build_adaptive_alpha()
+        self._adaptive_beta = self._build_adaptive_beta()
+        self._sibling_map: dict[int, list[int]] | None = None
         self._warm_up = int(config.get("warm_up", 0))
         self._warned_about_pe_layout = False
         self._warned_about_extra_dxyz = False
+        self._warned_about_missing_siblings = False
+        # Set per-training-step by the loop, read by DeformNetwork.forward
+        # for patch A's iteration-aware gating.
+        self._current_iteration = 0
 
     # ------------------------------------------------------------------ #
     # Component builders                                                 #
@@ -77,6 +88,27 @@ class MotionPriorHook:
             eps=g.get("eps", 1e-6),
         )
 
+    def _build_adaptive_beta(self) -> AdaptiveBeta | None:
+        c = self.cfg.get("cross_view_gating", {})
+        if not c.get("enabled", False):
+            return None
+        return AdaptiveBeta(
+            beta0=c.get("beta0", 1.0),
+            momentum=c.get("ema_momentum", 0.99),
+            eps=c.get("eps", 1e-6),
+        )
+
+    def configure_sibling_map(
+        self, cam_view_idx: list[int], cam_frame_idx: list[int]
+    ) -> None:
+        """Build the cam_idx -> [sibling cam_idx, ...] map from train cameras.
+
+        Call once at training start (after Scene is loaded). The hook caches
+        the result and reuses it across iters. Cheap (O(N)) and required
+        before cross_view_gating can return a non-trivial value.
+        """
+        self._sibling_map = build_sibling_map(cam_view_idx, cam_frame_idx)
+
     # ------------------------------------------------------------------ #
     # Patch A: temporal PE gating                                        #
     # ------------------------------------------------------------------ #
@@ -84,23 +116,35 @@ class MotionPriorHook:
     def gate_temporal_encoding(self, time_emb: Tensor, iteration: int) -> Tensor:
         """Multiply the sinusoidal PE channels by the frequency-band mask.
 
-        If `time_emb` last dim doesn't equal 2*num_bands, the layout isn't
-        what we expect -- return the input unchanged and warn once.
+        Supports two PE layouts:
+            * (..., 2*num_bands)         -- pure sinusoidal layout
+            * (..., 1 + 2*num_bands)     -- NeRF / SC-GS layout with identity
+              prefix; gates only the sin/cos tail, identity passes through
+
+        If `time_emb` last dim matches neither, returns input unchanged and
+        warns once.
         """
         if self._curriculum is None:
             return time_emb
-        expected = 2 * self._curriculum.num_bands
-        if time_emb.shape[-1] != expected:
-            if not self._warned_about_pe_layout:
-                import warnings
-                warnings.warn(
-                    f"MotionPriorHook: time_emb last dim {time_emb.shape[-1]} "
-                    f"!= expected {expected} (2 * num_bands). Disabling "
-                    f"frequency curriculum for this run."
-                )
-                self._warned_about_pe_layout = True
-            return time_emb
-        return self._curriculum.apply(time_emb, iteration)
+        expected_pure = 2 * self._curriculum.num_bands
+        expected_id = 1 + 2 * self._curriculum.num_bands
+        last_dim = time_emb.shape[-1]
+        if last_dim == expected_pure:
+            return self._curriculum.apply(time_emb, iteration)
+        if last_dim == expected_id:
+            identity = time_emb[..., :1]
+            tail = time_emb[..., 1:]
+            gated = self._curriculum.apply(tail, iteration)
+            return torch.cat([identity, gated], dim=-1)
+        if not self._warned_about_pe_layout:
+            import warnings
+            warnings.warn(
+                f"MotionPriorHook: time_emb last dim {last_dim} matches "
+                f"neither pure ({expected_pure}) nor identity-prefixed "
+                f"({expected_id}) layout. Disabling frequency curriculum."
+            )
+            self._warned_about_pe_layout = True
+        return time_emb
 
     # ------------------------------------------------------------------ #
     # Patch B: photometric gating                                        #
@@ -127,6 +171,80 @@ class MotionPriorHook:
         alpha = self._adaptive_alpha(E_t)
         weights = compute_gating_weights(E_t.unsqueeze(0), alpha=alpha.item())
         return float(weights[0].item())
+
+    # ------------------------------------------------------------------ #
+    # Patch D: cross-view consistency gating                             #
+    # ------------------------------------------------------------------ #
+
+    def cross_view_gating(
+        self,
+        cam_idx: int,
+        iteration: int,
+        render_sibling: Any,
+    ) -> float:
+        """Scalar in (0, 1] to scale the per-iter photometric loss.
+
+        Mirrors `photometric_gating` (patch B) but the trustworthiness
+        signal is *cross-view* photometric consistency, not lifted-flow
+        ARAP energy. Designed for multi-view VGM supervision where the
+        VGM hallucinates different content into different views at the
+        same timestep.
+
+        Cost: one extra rendering per sibling per iter. With 5-view
+        scenes (4 siblings) this is roughly 5x the per-iter forward cost
+        of vanilla SC-GS. See docs/design/scgs_hook_design.md (patch site D).
+
+        Args:
+            cam_idx: index of the current training viewpoint in the train
+                camera list.
+            iteration: current main-training iter (post-pre-training).
+            render_sibling: callable `(sib_cam_idx) -> (rendered_img, gt_img)`
+                where both tensors are (3, H, W) in [0, 1]. The loop owns
+                the deformation MLP and the renderer; the hook only owns
+                the gating math. Must be a no-op-safe pure function -- the
+                hook never calls .backward() on its outputs (residual is
+                detached internally).
+
+        Returns:
+            Scalar in (0, 1]. Returns 1.0 (no-op) if the component is
+            disabled, during warm-up, or if the sibling map is missing.
+        """
+        if self._adaptive_beta is None:
+            return 1.0
+        if iteration < self._warm_up:
+            return 1.0
+        if self._sibling_map is None:
+            if not self._warned_about_missing_siblings:
+                import warnings
+                warnings.warn(
+                    "MotionPriorHook.cross_view_gating: no sibling map "
+                    "configured; call configure_sibling_map() at training "
+                    "start. Disabling cross-view gating for this run."
+                )
+                self._warned_about_missing_siblings = True
+            return 1.0
+
+        siblings = self._sibling_map.get(int(cam_idx), [])
+        if not siblings:
+            return 1.0
+
+        residuals: list[Tensor] = []
+        with torch.no_grad():
+            for sib_idx in siblings:
+                out = render_sibling(sib_idx)
+                if out is None:
+                    continue
+                sib_image, sib_gt = out
+                # L1 between rendered and GT for the sibling view.
+                r = (sib_image - sib_gt).abs().mean()
+                residuals.append(r.detach())
+        if not residuals:
+            return 1.0
+        r_vec = torch.stack(residuals)  # (V_sib,)
+        mean_r = r_vec.mean()
+        beta = self._adaptive_beta(mean_r)
+        w = compute_cross_view_gate(r_vec, beta=float(beta.item()))
+        return float(w.item())
 
     # ------------------------------------------------------------------ #
     # Patch C: extra losses (rest-state L2)                              #
@@ -189,7 +307,7 @@ class MotionPriorHook:
         its deformation model. We don't define the patch here in pure form
         because it depends on the exact attribute layout of
         `third_party/SC-GS/utils/arap_deform.py:ARAPDeformer`, which we only
-        load on the GPU box. See `docs/scgs_hook_design.md` for the
+        load on the GPU box. See `docs/design/scgs_hook_design.md` for the
         installation procedure on the RunPod side.
 
         Stub here so SC-GS-less unit tests still import the module.
