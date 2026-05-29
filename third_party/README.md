@@ -15,7 +15,7 @@ This directory is **gitignored**. It is populated by
 
 - **SV4D 2.0** (primary) / **Wan-2.2 I2V** (fallback) — the *video generative model* front-end. Takes the static input image; produces a generated video for supervision. SV4D 2.0 is multi-view-aware by construction (preferred); Wan-2.2 is monocular I2V (fallback if SV4D 2.0 license is blocked).
 - **AnySplat** — feed-forward canonical 3DGS + camera poses from the generated video frames. Bypasses COLMAP / static 3DGS optimization. Static-trained, so it operates on dense temporal frames where inter-frame parallax approximates multi-view; works under SV4D 2.0's multi-view output, fragile under Wan-2.2's near-monocular output.
-- **SC-GS** — deformable backbone. Provides the deformation MLP, sparse control points, and ARAP regularizer. We patch its `train_gui.py` with three single-line hooks (see `docs/scgs_hook_design.md`).
+- **SC-GS** — deformable backbone. Provides the deformation MLP, sparse control points, and ARAP regularizer. We patch its `train_gui.py` with three single-line hooks (see `docs/design/scgs_hook_design.md`).
 - **SAM 2** — part-level segmentation on the static input image. Produces hierarchical part masks that we project through the canonical 3DGS depth to label Gaussians by part.
 
 ## Environment isolation

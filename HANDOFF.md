@@ -13,7 +13,7 @@ The project uses two distinct GPU environments. Match the work to the right one:
 | **Lab A4500 × 3** (60 GB total, default dev box) | Day-1 setup, SC-GS smoke, all four hook components, single-scene experiments, W1/W2 ablation rows, baseline reproductions (RigGS, MoSca, Shape of Motion), iteration on the patch file | Free (lab infra) |
 | **RunPod H100** (80 GB single card, rented) | W3/W4 full ablation sweep at scale, longer training runs, large-VRAM VGM at higher resolution, final paper-quality results | ~$2/hr (rented as needed) |
 
-**Default to the lab box.** Move to RunPod only when (a) a run blocks for >12 hours of A4500 time, or (b) you need to parallelize 4+ runs simultaneously and the lab is contended. The first 2 weeks of `docs/experiments.md` are entirely doable on the lab box.
+**Default to the lab box.** Move to RunPod only when (a) a run blocks for >12 hours of A4500 time, or (b) you need to parallelize 4+ runs simultaneously and the lab is contended. The first 2 weeks of `docs/design/experiments.md` are entirely doable on the lab box.
 
 **Same setup script** works on both — `scripts/setup_runpod.sh` (badly named; works on any Ubuntu+CUDA GPU box including the lab one). Don't be surprised the name says "runpod"; rename it later if it bothers you.
 
@@ -21,7 +21,7 @@ The project uses two distinct GPU environments. Match the work to the right one:
 
 We build a **perception module for visual world models**: from a single static image, produce an articulation-aware 4D Gaussian Splatting scene that a downstream physics simulator can ingest for IK / contact / manipulation reasoning. The contribution is the intersection of **diffusion-supervised 4D reconstruction** (ViDAR, 4D-Fly, DIFF4SPLAT) and **articulated 4D Gaussian reconstruction** (RigGS, VideoArtGS, Part2GS) — a corner the May-2026 landscape audit confirmed is unoccupied. Three components: SAM-2-grounded piecewise-rigid ARAP, ARAP-energy-based supervision gating, and a frequency-domain motion curriculum.
 
-For the full positioning argument: `docs/vwm_framing.md`. For the experiment plan: `docs/experiments.md`. For the SC-GS integration design: `docs/scgs_hook_design.md`.
+For the full positioning argument: `docs/design/vwm_framing.md`. For the experiment plan: `docs/design/experiments.md`. For the SC-GS integration design: `docs/design/scgs_hook_design.md`.
 
 ## 2. What's already shipped (and tested on CPU)
 
@@ -74,7 +74,7 @@ Single 80 GB H100 fits every model comfortably with no quantization gymnastics. 
 - Reproducing ViDAR on DyCheck (their training was done on 8×A100; H100 single-card halves the wall time)
 - Final paper renders + figures
 
-Cost estimate per `docs/experiments.md`: ~$200-300 on RunPod if we use the lab box for W1/W2, vs. ~$680 originally budgeted assuming everything ran on RunPod.
+Cost estimate per `docs/design/experiments.md`: ~$200-300 on RunPod if we use the lab box for W1/W2, vs. ~$680 originally budgeted assuming everything ran on RunPod.
 
 ## 4. The first day on the lab A4500 box (W1 of the experiment timeline)
 
@@ -103,7 +103,7 @@ Expected from the 2026-05-12 read:
 - `train_gui.py:1123` — `loss = loss + self.deform.reg_loss` (after-insertion site C)
 - `utils/time_utils.py:1080` — `def arap_loss(self, t=None, delta_t=0.05, t_samp_num=2):` (our adapter monkey-patches this)
 
-If any of these have moved: regenerate `scripts/patches/scgs_hook.patch` and update `docs/scgs_hook_design.md`.
+If any of these have moved: regenerate `scripts/patches/scgs_hook.patch` and update `docs/design/scgs_hook_design.md`.
 
 ### 4.3 SC-GS smoke run (~1 hour)
 Reproduce SC-GS-default on D-NeRF `jumpingjacks` with no MotionPrior modifications to confirm the env works:
@@ -180,7 +180,7 @@ python scripts/eval.py \
     --emit_urdf
 # Same for jumpingjacks_art_only.
 # Diff the two eval.json files. Inter-part angular consistency should be
-# noticeably higher for art_only (the W1 gate per docs/experiments.md).
+# noticeably higher for art_only (the W1 gate per docs/design/experiments.md).
 ```
 
 ## 5. Open decisions you need to make on the pod
@@ -198,7 +198,7 @@ python scripts/eval.py \
 RigGS (CVPR 2025) already does "ARAP + monocular video + articulated 4DGS" on general objects. Our delta is **diffusion supervision + SAM-2 part labels + single-image input + scene-level**. If a reviewer says "RigGS already did this," the answer is: yes, on real captured video with skeleton extraction; we operate on a hallucinated VGM video with SAM 2 part labels, and the parent settings don't transfer cleanly (their skeleton extraction needs consistent 2D keypoints across frames, which generative video doesn't provide). Be specific about the delta.
 
 ### 6.2 The VWM framing is load-bearing
-The paper opens with the **perception/dynamics/policy decomposition** and our contribution to the perception layer. The single-image-input requirement is what makes this VWM-relevant — a robot in the wild doesn't have captured video. Without the VWM framing, the paper reads as "yet another monocular-4D paper." `docs/vwm_framing.md` is the source of truth.
+The paper opens with the **perception/dynamics/policy decomposition** and our contribution to the perception layer. The single-image-input requirement is what makes this VWM-relevant — a robot in the wild doesn't have captured video. Without the VWM framing, the paper reads as "yet another monocular-4D paper." `docs/design/vwm_framing.md` is the source of truth.
 
 ### 6.3 The simulator-import demo is required, not optional
 For W4: load a trained 4DGS into Genesis (or PyBullet) via the URDF we emit; run articulated IK; show that ours works and SC-GS-default fails. This is the evidence that converts "we improved a metric" into "we made the output downstream-usable." Without it, reviewers say "show me articulation matters."
@@ -213,10 +213,24 @@ EV_Final_Project/
 ├── README.md                          # short intro, pipeline diagram
 ├── HANDOFF.md                         # THIS FILE
 ├── docs/
-│   ├── vwm_framing.md                 # paper intro source-of-truth
-│   ├── experiments.md                 # ablation matrix, timeline, baselines
-│   ├── scgs_hook_design.md            # 3 patch sites + contract
-│   ├── ownership.md                   # team split
+│   ├── design/                        # living references (motion, hook, framing, API, experiments)
+│   │   ├── motion_design.md
+│   │   ├── scgs_hook_design.md        # 3 patch sites + contract
+│   │   ├── vwm_framing.md             # paper intro source-of-truth
+│   │   ├── sv4d2_api.md
+│   │   ├── experiments.md             # ablation matrix, timeline, baselines
+│   │   └── pipeline.png
+│   ├── runbooks/                      # how-to-run / how-to-reproduce
+│   │   ├── demo_runbook.md
+│   │   └── sv4d_runbook.md
+│   ├── reports/                       # dated progress snapshots (YYYY-MM-DD_*)
+│   │   ├── 2026-05-12_progress.md
+│   │   ├── 2026-05-13_pipeline_state.md
+│   │   ├── 2026-05-29_checkpoint.md
+│   │   └── 2026-05-29_final_report.md
+│   ├── planning/                      # ownership + slide plans
+│   │   ├── ownership.md               # team split
+│   │   └── 2026-05-13_slide_plan.md
 │   └── superpowers/plans/
 │       └── 2026-05-11-codebase-bootstrap.md
 ├── motionprior/
@@ -268,7 +282,7 @@ These are notes; the code repo is the source of truth for what's implemented.
 
 1. **SC-GS rasterizer build fails on A4500**: A4500 is Ampere (compute capability 8.6), supported by SC-GS's CUDA extensions. If the build fails, check CUDA toolkit version (need 11.8 to match SC-GS's pin); fall back to a Docker image if the conda CUDA install conflicts.
 2. **SV4D 2.0 weights blocked**: switch to Wan-2.2 with 8-bit quantization across 2 GPUs. Update `vgm.py:Wan22I2VAdapter` with the bitsandbytes loading code (~20 LOC).
-3. **AnySplat fails on generated video**: known limitation — it's static-trained. Workaround in `docs/scgs_hook_design.md` § 4.7: swap AnySplat for DepthAnything V3 per-window if AnySplat assumption breaks.
+3. **AnySplat fails on generated video**: known limitation — it's static-trained. Workaround in `docs/design/scgs_hook_design.md` § 4.7: swap AnySplat for DepthAnything V3 per-window if AnySplat assumption breaks.
 4. **Articulation result is null on jumpingjacks**: this is the W1 stop-gate. Pivot to Option B (real monocular video, no VGM) from the survey before W2. The codebase still runs end-to-end.
 
 ## 10. The single thing to do first
