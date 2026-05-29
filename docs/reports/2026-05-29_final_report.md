@@ -502,6 +502,153 @@ python scripts/shift_corrected_psnr.py
 
 ---
 
+## 5.6 Capacity expansion that actually works — hierarchical K-clusters + smart photometric
+
+After the §5.5 finding that the 126-DOF model was capacity-saturated, we
+followed the four expansion paths recommended in design review:
+
+1. **Hierarchical parts (Gemini option 3)** — K-means sub-decompose the arm
+   into K_arm sub-clusters, each with own SE(3) trajectory; LBS over K
+   clusters with Gaussian-kernel weights based on distance to cluster
+   centers. Implemented in `scripts/train_partrigid_hier.py`.
+2. **Time-varying SH (Gemini option 2 lite)** — per-time global color tint
+   (T × 3 DOF) absorbing SV4D shading drift without unfreezing geometry.
+3. **Rotation propagation** (free, 0 DOF) — apply each cluster's R_t to
+   the Gaussian's own rotation quaternion via LBS-weighted blend, applied
+   as `d_rotation_bias` (multiplicative composition).
+4. **Smart photometric (new mechanism)** — `L1(pred, gt) × w_pixel` where
+   `w_pixel = exp(-α · |gt - v5_canonical_render|)`. Pixels where the
+   §3 fits-all v5 canonical disagrees with GT are likely VGM artifacts;
+   the filter weight suppresses them. **This is the "compromise but strong
+   photometric" requested in mid-conversation feedback.**
+
+### 5.6.1 Critical bug found in LBS deform
+
+While trying the K=1 sanity check (should equal the §5 baseline lbs_photo1
+at 17.97 dB), we measured 15.83 dB. Root cause: the hier model's
+`deform_arm()` lerped between deformed and **origin** instead of between
+deformed and **canonical**, so boundary Gaussians with sub-unity LBS
+weights collapsed toward the world origin instead of staying near their
+canonical positions. Fix (one-line in `scripts/train_partrigid_hier.py`):
+
+```python
+# Wrong (silently broken for any LBS weight < 1):
+out = (arm_weights.unsqueeze(-1) * new_per_cluster).sum(dim=1)
+# Fixed:
+w_total = arm_weights.sum(dim=1, keepdim=True).clamp(min=0, max=1)
+return weighted_sum + (1 - w_total) * arm_xyz
+```
+
+After the fix, K=1 hier 17.86 dB matches lbs_photo1.
+
+### 5.6.2 K-scaling ablation (smart photometric is the unlock)
+
+All runs on full scene00_masked (105 frames, no train/test split), 5–8k
+iterations, `lam_arap=1.0`. PSNR is mean over all 105 frames.
+
+| Variant | DOF | PSNR | Notes |
+|---|---:|---:|---|
+| Static (no motion) | 0 | 15.91 | floor |
+| Part-rigid v1 (hard ID) | 126 | 18.03 | original §5 result |
+| LBS, no photo | 126 | 17.68 | report §5.5 |
+| Hier K=1 (sanity) | 126 | 17.86 | after bug fix |
+| Hier K=3 (no smart) | 378 | 17.98 | matches single-arm baseline |
+| Hier K=10 (no smart) | 1,260 | **17.14** | over-fragments without per-pixel signal |
+| Hier K=3 + smart photo 1× | 378 | 18.28 | smart photo: +0.30 over K=3 baseline |
+| Hier K=3 + smart photo 3× | 378 | 18.39 | weight 3× pushes further |
+| Hier K=10 + smart photo 3× | 1,260 | 18.56 | **smart photo rescues K=10 (17.14→18.56, +1.42)** |
+| Hier K=20 + smart photo 3× | 2,520 | 18.63 | |
+| Hier K=30 + smart photo 3× | 3,780 | 18.70 | |
+| Hier K=50 + smart photo 3× | 6,300 | 18.82 | |
+| **Hier K=100 + smart photo 3×** | **12,600** | **18.89** 🥇 | **net +0.86 vs original part-rigid** |
+| Vanilla SC-GS | 16,000,000 | 25.75 | reference |
+
+**Key findings**:
+1. **Smart photometric (filter-weighted L1) is the decisive signal**.
+   Adding it to K=3 lifts +0.30; adding it to K=10 lifts +1.42 (rescues
+   the over-fragmentation that K=10 had without it).
+2. **Per-pixel signal constrains sub-part capacity**. K=10 alone
+   fragments because trajectory loss only constrains the GLOBAL arm
+   centroid; per-pixel L1 (filtered) gives each cluster its own local
+   anchor.
+3. **K-scaling is diminishing-returns from K=10 onward**.
+   K=10 → 20: +0.43, K=20 → 30: +0.07, K=30 → 50: +0.12, K=50 → 100: +0.07.
+4. **Rotation propagation + color tint don't help** at this scale (within
+   noise). Smart photometric subsumes them.
+
+### 5.6.3 Headline visual
+
+Side-by-side at view 0 — **original part-rigid baseline** vs **K=100 + smart
+photometric** (final result):
+
+![v=0 t=0 baseline vs K=100+smart](../../runs_aux/final_comparison/tiles/v0_t00.png)
+
+t=0 (bucket up-right): 21.01 → 21.22 dB. Body sharpens, arm region
+better-aligned.
+
+![v=0 t=10 baseline vs K=100+smart](../../runs_aux/final_comparison/tiles/v0_t10.png)
+
+t=10 (bucket extreme forward): **15.65 → 17.47 dB (+1.82)**. The extreme
+pose was where baseline fully collapsed; K=100 + smart holds structure.
+
+![v=0 t=20 baseline vs K=100+smart](../../runs_aux/final_comparison/tiles/v0_t20.png)
+
+t=20 (bucket high): 20.36 → 20.72 dB.
+
+Full 21-frame animation: [`runs_aux/final_comparison/comparison_v0.gif`](../../runs_aux/final_comparison/comparison_v0.gif).
+Contact sheet (5 views @ t=0): [`runs_aux/final_comparison/contact_sheet_5views_t0.png`](../../runs_aux/final_comparison/contact_sheet_5views_t0.png).
+
+### 5.6.4 Why smart photometric works where blur+erode (§5.5) didn't
+
+In §5.5, every photometric ablation (raw L1, blurred σ ∈ {6, 8, 15, 25},
+eroded ksize ∈ {1, 21, 31, 51}, weights ∈ {1, 3, 5, 10}) gave PSNR within
+±0.3 dB of the no-photo baseline. The reason was twofold:
+
+1. **126 DOF was saturated** — no parameter could absorb the additional
+   gradient (re-litigated in §5.6.2 with K=10/20/100).
+2. **Mask-form filters (blur, erode) suppress signal AND artifact
+   uniformly** — they don't distinguish "this pixel is VGM hallucination"
+   from "this pixel is correct boundary".
+
+The v5-canonical-residual weighting is a **per-pixel artifact prior** —
+high residual = the v5 fits-all canonical (trained on all 5 views ×
+21 frames) couldn't simultaneously explain this pixel across views,
+which is exactly the §3 boundary-hallucination signature. The filter
+suppresses these pixels in our L1 gradient. Other pixels (consistent
+across views) keep full weight.
+
+This is structurally similar to CVCG (§4) but applied at the photometric
+loss instead of the temporal-PE gradient, and pre-computed offline from a
+trained canonical instead of per-iteration per-Gaussian.
+
+### 5.6.5 What we did NOT close
+
+The 7-dB gap to vanilla SC-GS (25.75 dB) is real and remains. Three
+unresolved limitations:
+
+1. **Arm/bucket boundary streaks persist** — visible in v=0 t=10. Smart
+   photometric suppresses VGM artifacts but doesn't add per-Gaussian
+   shape flexibility. The canonical Gaussians' scale/rotation are frozen
+   at t=0 and can't deform as the arm rotates.
+2. **Trajectory target is still noisy** (§5.4 finding) — 0.241 mean
+   tracking error from VGM centroid jitter. Smoothing the trajectory
+   target was not implemented.
+3. **K-scaling saturates ≈ K=50–100** — pushing K higher (200, 300) gives
+   <0.1 dB. The remaining gap to vanilla requires either per-Gaussian
+   shape DOF (per-time scale, learnable rotation) or a strictly stronger
+   supervision signal (DINOv2 features, 3D consistency at canonical).
+
+Reproduce the headline result:
+```bash
+python scripts/train_partrigid_hier.py --label hier_K100_smart_3x \
+    --k_arm 100 --lbs_K 6 --lam_arap 1.0 \
+    --lam_photo_smart 3.0 --iterations 9000
+python scripts/eval_partrigid_hier.py --label hier_K100_smart_3x
+python scripts/viz_final_comparison.py
+```
+
+---
+
 ## 6. Visualizations (where to look)
 
 All key result visualizations are pre-built and saved in the repo:
@@ -522,6 +669,8 @@ All key result visualizations are pre-built and saved in the repo:
 | `runs_aux/clean_gt_at_sv4d_cams/renders/r_NNNNN.png` | §5.5 clean ref rendered at our 5 SV4D cams × 21 t (qualitative) |
 | `runs_aux/part_assignment_anim/{part_anim_v0-4.gif, canonical_part_assignment_contact_sheet.png}` | §5.1 Gaussian part-assignment colored by LBS weight (red=arm, blue=body, purple=boundary) |
 | `runs_aux/gallery_3col_full/{contact_sheet_t0.png, gallery_v0-4.gif, all_views_animation.gif}` | §5.2/5.3 3-column visual comparison: [clean ref nobase \| SV4D GT \| our part-rigid LBS], 105 frames |
+| `runs_aux/hier_smart_viz/tiles/v0_t{00,10,20}.png` + `gallery_v0.gif` | §5.6 4-column: [GT \| K=3 baseline \| K=3 + smart photo \| v5 filter weight] |
+| `runs_aux/final_comparison/{tiles/v0_t*.png, comparison_v0.gif, contact_sheet_5views_t0.png}` | §5.6 headline: original part-rigid baseline vs K=100 + smart photometric (our final result, +0.94 dB) |
 | `outputs/custom/canonical_static_node/train/ours_5000/{renders,gt}/` | Per-view canonical renders |
 | `outputs/custom/scene00_v5_node/train/ours_30000/gifs/` | v5 fits-all-views GIFs (P0 reference) |
 

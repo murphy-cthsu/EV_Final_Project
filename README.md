@@ -40,8 +40,12 @@ Full 21-frame animation at view 0: [`runs_aux/gallery_3col_full/gallery_v0.gif`]
 | Static canonical (no motion) | 15.91 | 0 | — | baseline floor |
 | Part-rigid v1 (hard ID) | 18.03 | 126 | 35 s | original |
 | LBS (soft per-Gaussian weights) | 17.97 | 126 | 35 s | one-arm |
-| **Hier K=3** (3 sub-parts, ARAP) | **17.98** | 378 | 92 s | after LBS bug fix |
-| Hier K=10 | 17.14 | 1,260 | 132 s | over-fragments |
+| Hier K=3 (3 sub-parts, ARAP) | 17.98 | 378 | 92 s | after LBS bug fix |
+| Hier K=10 (no smart photo) | 17.14 | 1,260 | 132 s | over-fragments |
+| Hier K=3 + smart photo (v5-filter) | 18.28 | 378 | 100 s | smart filter unlocks gain |
+| Hier K=10 + smart photo 3× | 18.56 | 1,260 | 110 s | smart photo rescues K=10 |
+| Hier K=50 + smart photo 3× | 18.82 | 6,300 | 210 s | |
+| **Hier K=100 + smart photo 3× (final)** | **18.89** 🥇 | **12,600** | **347 s** | **+0.86 over baseline** |
 | Vanilla SC-GS (16 M deform-MLP) | 25.75 | 16,000,000 | ~900 s | reference upper |
 
 **Engineering finding**: a one-line LeakyReLU patch to SC-GS's deform-MLP
@@ -132,9 +136,15 @@ Stage E: train SE(3) for K sub-parts         → 126–1260 DOF, NO raw RGB loss
 - **LBS deform bug fix**: canonical fallback for sub-unity weights (regression 14.78 → 17.98 dB)
 
 ### 🚧 In progress
-- Per-cluster trajectory targets for K=10 (current global-centroid trajectory is too weak)
-- Smart photometric loss with VGM-artifact-aware pixel filter
-- Sparse control nodes architecture (Gemini Option 1, ~12k DOF)
+- Per-cluster trajectory targets for K=10+ (further constrain sub-parts)
+- DINOv2 / foundation-feature loss (replace photometric entirely)
+- Per-time Gaussian scale (let canonical Gaussians stretch as arm rotates)
+
+### ✅ Just completed
+- **Smart photometric loss with v5-canonical-residual filter** (+0.30 to +1.42 dB depending on K)
+- **K-scaling ablation** (K=1 → 100, diminishing returns from K=50)
+- **LBS deform bug fix** — canonical fallback for sub-unity weights
+- **Headline visual** ([`runs_aux/final_comparison/`](runs_aux/final_comparison/))
 
 ### ⏳ Deferred
 - Part-rigid data leak fix (training on full scene00 vs eval on split_t test)

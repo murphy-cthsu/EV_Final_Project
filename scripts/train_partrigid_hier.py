@@ -150,6 +150,16 @@ def main():
                    help="Per-time global color tint (cheap 4D-SH approximation)")
     p.add_argument("--use_rot_prop", action="store_true",
                    help="Apply per-cluster rotation to Gaussian quaternion via LBS (Tier 1 free fix)")
+    p.add_argument("--lam_photo_smart", type=float, default=0.0,
+                   help="Smart photometric loss weight: L1(pred, gt) * filter_weight, "
+                        "where filter = exp(-alpha * |gt - v5_render|). "
+                        "Suppresses pixels where v5 fits-all canonical disagrees with GT "
+                        "(likely VGM artifacts).")
+    p.add_argument("--photo_smart_alpha", type=float, default=8.0,
+                   help="Filter sharpness for smart photometric")
+    p.add_argument("--v5_render_dir", type=str,
+                   default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
+                   help="Per-(view, time) renders from the fits-all v5 canonical (§3)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
@@ -271,6 +281,31 @@ def main():
     pipe = pp.extract(parser_pipe.parse_args([]))
     background = torch.tensor([1, 1, 1], dtype=torch.float32, device=args.device)
 
+    # ===== Pre-compute smart-photometric filter weights from v5 fits-all canonical =====
+    smart_photo_weights = None
+    if args.lam_photo_smart > 0:
+        v5_dir = REPO_ROOT / args.v5_render_dir
+        if not v5_dir.exists():
+            raise FileNotFoundError(f"v5 render dir missing: {v5_dir}")
+        smart_photo_weights = []
+        for i, f in enumerate(data["frames"]):
+            v = int(f["view_idx"]); ti = int(f["frame_idx"])
+            flat_idx = v * T + ti
+            v5_path = v5_dir / f"{flat_idx:05d}.png"
+            if not v5_path.exists():
+                raise FileNotFoundError(f"missing v5 render: {v5_path}")
+            v5_rgba = np.asarray(iio.imread(v5_path), dtype=np.float32) / 255.0
+            v5_alpha = v5_rgba[..., 3:4] if v5_rgba.shape[-1] == 4 else np.ones_like(v5_rgba[..., :1])
+            v5_rgb = v5_rgba[..., :3] * v5_alpha + 1.0 * (1 - v5_alpha)
+            gt_rgb_np = gt_rgbs[i].permute(1, 2, 0).cpu().numpy()
+            residual = np.abs(gt_rgb_np - v5_rgb).mean(axis=-1)  # (H, W)
+            weight = np.exp(-args.photo_smart_alpha * residual)
+            smart_photo_weights.append(torch.from_numpy(weight.astype(np.float32)).to(args.device))
+        # Diagnostics
+        avg_weight = float(torch.stack(smart_photo_weights).mean())
+        print(f"[hier] smart photo: pre-built {len(smart_photo_weights)} weight maps  "
+              f"(mean weight={avg_weight:.3f}, low = filtered-as-artifact)")
+
     print(f"[hier] training {args.iterations} iters with {len(cams)} cameras")
     t0 = time.time()
     arm_mask_t = arm_w_global_t > 0.5  # use canonical arm-mask for ARAP
@@ -372,9 +407,20 @@ def main():
             mask3 = eroded.unsqueeze(0).expand_as(rd)
             L_photo = ((rd - gd).abs() * mask3).sum() / mask3.sum().clamp(min=1)
 
+        # Smart photometric (artifact-filtered L1) — Gemini path 2 with VGM filter
+        L_photo_smart = torch.tensor(0.0, device=args.device)
+        if args.lam_photo_smart > 0 and smart_photo_weights is not None:
+            gt_rgb = gt_rgbs[idx]
+            w_pix = smart_photo_weights[idx]                          # (H, W) confidence
+            # Restrict to FG via gt_alpha to avoid penalizing white background
+            fg_w = w_pix * gt_alpha                                   # (H, W)
+            err = (img - gt_rgb).abs().mean(dim=0)                    # (H, W)
+            L_photo_smart = (err * fg_w).sum() / fg_w.sum().clamp(min=1)
+
         loss = (args.lam_silh * L_silh + args.lam_traj * L_traj +
                 args.lam_smooth * L_smooth + args.lam_arap * L_arap +
-                args.lam_photo_blur * L_photo)
+                args.lam_photo_blur * L_photo +
+                args.lam_photo_smart * L_photo_smart)
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -382,7 +428,8 @@ def main():
         if it % 500 == 0:
             print(f"[hier] it {it:>5d}  loss={loss:.4f}  silh={L_silh:.4f}  "
                   f"traj={L_traj:.4f}  smooth={L_smooth:.4f}  arap={float(L_arap):.4f}  "
-                  f"photo={L_photo:.4f}  ({time.time()-t0:.0f}s)")
+                  f"photo={L_photo:.4f}  photo_smart={float(L_photo_smart):.4f}  "
+                  f"({time.time()-t0:.0f}s)")
 
     state = {
         "trans": model.trans.detach().cpu().numpy(),
