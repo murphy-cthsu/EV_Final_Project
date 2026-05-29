@@ -1,7 +1,7 @@
 # Experiment Design — MotionPrior-4DGS
 
 > Owner: Murphy. Last updated: 2026-05-12 (Option C: VGM-supervised articulation-aware 4DGS from single image; VWM perception module framing).
-> Positioning: articulation × video-diffusion-supervision × single-image input. See [`docs/vwm_framing.md`](vwm_framing.md), [Survey](../../MP_Obsidian_Notes/wiki/research/Image_to_4D_Survey_May2026.md), [MotionPrior4DGS wiki](../../MP_Obsidian_Notes/wiki/research/MotionPrior4DGS.md).
+> Positioning: articulation × video-diffusion-supervision × single-image input. See [`docs/design/vwm_framing.md`](vwm_framing.md), [Survey](../../../MP_Obsidian_Notes/wiki/research/Image_to_4D_Survey_May2026.md), [MotionPrior4DGS wiki](../../../MP_Obsidian_Notes/wiki/research/MotionPrior4DGS.md).
 
 > **[2026-05-12 update]** Articulation-cluster audit found that RigGS (CVPR 2025) already does ARAP + articulated + monocular video; VideoArtGS (Sep 2025) does articulated monocular 4D with hybrid center-grid parts. Surviving novelty is the intersection: articulation + diffusion supervision + single-image input. Baseline list updated; experiment matrix below adds RigGS as a critical comparison.
 

@@ -47,15 +47,22 @@ d_xyz, d_rotation, d_scaling, ... = self.deform.step(
 
 ## Hook integration points
 
-Three patches to `train_gui.py`, all small:
+Four patches to `train_gui.py`, all small:
 
 | # | Where | Patch |
 |---|---|---|
 | **A** | Just after `time_input = ...` (~line 1075) | `time_input = hook.gate_temporal_encoding(time_input, iteration)` — applies frequency curriculum. |
 | **B** | Replace `Ll1 = l1_loss(...)` (line 1118) with masked version | `Ll1 = l1_loss(image, gt_image) * hook.photometric_gating(fid, iteration)` — applies ARAP-energy gating. |
 | **C** | After `loss = loss + self.deform.reg_loss` (line 1123) | `loss = loss + hook.extra_losses(d_xyz, iteration)` — adds rest-state L2. |
+| **E** | Same site as B, multiplicatively combined | `Ll1 *= hook.cross_view_gating(cam_idx, iteration, render_sibling)` — applies cross-view consistency gating. The `render_sibling` closure renders the *current* canonical state (reusing the iter's `d_xyz/d_rotation/d_scaling`) from sibling viewpoints at the same `fid` and returns `(render, gt)` per sibling. **Adds ~5× per-iter forward cost** for 5-view scenes. |
 
 Articulation-aware ARAP requires a fourth change inside `DeformModel.reg_loss` (or `ARAPDeformer.energy`): per-edge weights from `motionprior.losses.articulated_edge_weights`. This is the only patch that touches SC-GS internals rather than the training loop. Done by monkey-patching `ARAPDeformer.cal_arap_error` at hook construction time.
+
+### Why patch E exists
+
+The framework's three protective components (B = ARAP-energy gating, C3 = frequency curriculum, the inter-part ARAP) all target *temporal* failure modes of generative-video supervision — drift, jitter, per-frame hallucination. They do **not** address the failure mode specific to *multi-view* VGM output (SV4D 2.0 etc.): the V views are each temporally consistent within themselves but mutually disagree on the underlying 3D geometry. The W3 measurement on `data/custom/scene00_split` (5-view × 21-frame SV4D output, view-2 held out) made this concrete: PSNR 31 dB on train views, 13 dB on the held-out view — an 18 dB gap caused by canonical Gaussians being placed to fit 4 mutually-inconsistent views without geometric triangulation constraint.
+
+CVCG generalizes patch B's *trust-by-consistency* contract from the temporal axis (lifted-trajectory rigidity) to the spatial / multi-view axis (cross-view photometric agreement). The math is the same: `w = exp(−β · residual)` with adaptive `β` normalized by an EMA. Only the residual's source differs. Composable: rows B+E together gate by both temporal and spatial trustworthiness signals.
 
 ## The hook contract
 

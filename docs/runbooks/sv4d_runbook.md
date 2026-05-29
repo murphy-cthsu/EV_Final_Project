@@ -1,6 +1,6 @@
 # SV4D 2.0 → SC-GS pipeline runbook
 
-> Companion to `docs/sv4d2_api.md` (the API reference). This document is the
+> Companion to `docs/design/sv4d2_api.md` (the API reference). This document is the
 > step-by-step **operational** runbook for actually running the pipeline.
 
 ## What this pipeline does

@@ -1,6 +1,6 @@
 # Live-demo runbook — group discussion 2026-05-13
 
-> Companion to `docs/PROGRESS_2026-05-12.md`. Every command below reproduces a published artifact in <2 min. No GPU needed.
+> Companion to `docs/reports/2026-05-12_progress.md`. Every command below reproduces a published artifact in <2 min. No GPU needed.
 
 ## 0. One-time setup (you've already done this — sanity check)
 
@@ -105,14 +105,14 @@ Already on disk. 2D label maps tied to `train/r_000.png` per scene, 11–18 part
 cat scripts/patches/scgs_hook.patch | head -50
 ls motionprior/integration/
 # → scgs_hook.py, scgs_arap_adapter.py
-cat docs/scgs_hook_design.md | sed -n '1,60p'
+cat docs/design/scgs_hook_design.md | sed -n '1,60p'
 ```
 
 The hook degrades gracefully — `--ablation scgs_default` is the no-op path and was verified to match the baseline.
 
 ## 7. "If someone challenges the failure claim or the contribution"
 
-§1 and §4 of `PROGRESS_2026-05-12.md` are the prepared responses. The key reframings:
+§1 and §4 of `docs/reports/2026-05-12_progress.md` are the prepared responses. The key reframings:
 
 **On the contribution itself:**
 - The claim is a **3-component joint system**, not "better ARAP."
