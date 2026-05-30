@@ -40,9 +40,9 @@ from gaussian_renderer import render  # noqa: E402
 from arguments import PipelineParams  # noqa: E402
 from argparse import ArgumentParser as _A  # noqa: E402
 
-CANON_PLY = REPO_ROOT / "outputs/custom/canonical_static_node/point_cloud/iteration_5000/point_cloud.ply"
-PART_DIR = REPO_ROOT / "runs_aux" / "part_assignment"
-SCENE = REPO_ROOT / "data" / "custom" / "scene00_masked"
+CANON_PLY_DEFAULT = REPO_ROOT / "outputs/custom/canonical_static_node/point_cloud/iteration_5000/point_cloud.ply"
+PART_DIR_DEFAULT = REPO_ROOT / "runs_aux" / "part_assignment"
+SCENE_DEFAULT = REPO_ROOT / "data" / "custom" / "scene00_masked"
 
 
 def axis_angle_to_quaternion(aa: torch.Tensor) -> torch.Tensor:
@@ -166,7 +166,13 @@ def main():
                    help="Filter sharpness for smart photometric")
     p.add_argument("--v5_render_dir", type=str,
                    default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
-                   help="Per-(view, time) renders from the fits-all v5 canonical (§3)")
+                   help="Per-(view, time) renders from the fits-all v5 canonical (§3) "
+                        "OR the d-3dgs clean reference for lego_v2")
+    p.add_argument("--canon_ply",  default=None, help="Override canonical ply path")
+    p.add_argument("--part_dir",   default=None, help="Override part assignment dir")
+    p.add_argument("--scene_dir",  default=None, help="Override scene dir (with transforms_train.json)")
+    p.add_argument("--use_test_too", action="store_true",
+                   help="Also include test split frames in training (for lego_v2 where we eval against d-3dgs)")
     p.add_argument("--use_per_time_scale", action="store_true",
                    help="Per-(cluster, time) 3D scale residual (+K*T*3 DOF). "
                         "Lets Gaussians in each cluster stretch differently at each time. "
@@ -185,6 +191,10 @@ def main():
     # ===== Load canonical Gaussians (frozen) =====
     print(f"[hier] loading canonical")
     gaussians = GaussianModel(3, fea_dim=2, with_motion_mask=False)
+    CANON_PLY = Path(args.canon_ply) if args.canon_ply else CANON_PLY_DEFAULT
+    PART_DIR  = Path(args.part_dir)  if args.part_dir  else PART_DIR_DEFAULT
+    SCENE     = Path(args.scene_dir) if args.scene_dir else SCENE_DEFAULT
+    print(f"[hier] CANON={CANON_PLY.name}  PART={PART_DIR.name}  SCENE={SCENE.name}")
     gaussians.load_ply(str(CANON_PLY), og_number_points=0)
     for attr in ["_xyz", "_features_dc", "_features_rest",
                  "_scaling", "_rotation", "_opacity"]:
@@ -263,6 +273,13 @@ def main():
 
     # ===== Cameras =====
     data = json.loads((SCENE / "transforms_train.json").read_text())
+    # Optionally merge test frames into training set (when eval is against external GT, not split test)
+    if args.use_test_too:
+        test_meta_path = SCENE / "transforms_test.json"
+        if test_meta_path.exists():
+            test_meta = json.loads(test_meta_path.read_text())
+            data["frames"] = data["frames"] + test_meta["frames"]
+            print(f"[hier] merged {len(test_meta['frames'])} test frames into train (total {len(data['frames'])})")
     fov_x = data["camera_angle_x"]
     H = W = 576
     cams = []
@@ -273,7 +290,15 @@ def main():
     FovY = focal2fov(fov2focal(fov_x, W), H)
     for i, f in enumerate(data["frames"]):
         ti = int(f["frame_idx"])
-        png = SCENE / "train" / f"{Path(f['file_path']).name}.png"
+        # Try train/ then test/ (file_path may use either after split)
+        png_name = f"{Path(f['file_path']).name}.png"
+        for split in ("train", "test"):
+            cand = SCENE / split / png_name
+            if cand.exists():
+                png = cand
+                break
+        else:
+            raise FileNotFoundError(f"frame not found: {png_name}")
         rgba = np.asarray(iio.imread(png))
         alpha = (rgba[..., 3] > 127).astype(np.float32)
         rgb = (rgba[..., :3].astype(np.float32) / 255.0)
