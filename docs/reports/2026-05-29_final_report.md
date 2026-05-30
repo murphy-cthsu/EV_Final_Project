@@ -702,7 +702,8 @@ scene00_masked full 105 frames.
 | K=100 + smart 3× + per-time scale | **18,900** | **19.11** | **+0.22** ✓ |
 | K=100 + scale + rot_prop | 18,900 | 19.11 | 0 (rot subsumed) |
 | K=100 + scale + lam_scale_smooth 0.1 | 18,900 | 19.11 | 0 (smoothness not binding) |
-| **K=200 + smart 3× + per-time scale** | **25,200** | **19.26** | **+0.15** ✓ |
+| K=200 + smart 3× + per-time scale | 25,200 | 19.26 | +0.15 ✓ |
+| **K=300 + smart 3× + per-time scale** | **37,800** | **19.32** | **+0.06** (marginal) |
 
 Per-time scale is the second confirmed mechanism (smart photometric being
 the first). K-scaling above 100 still adds marginal gain when scale is
@@ -729,8 +730,9 @@ Net total improvement, full method timeline:
 | + smart photometric (v5-filtered L1) | 18.28 (K=3) | +0.25 | +0.25 |
 | + K-scaling (K=3 → K=100) | 18.89 | +0.61 | +0.86 |
 | + per-time scale residual | 19.11 (K=100) | +0.22 | +1.08 |
-| + K=200 capacity | **19.26** | **+0.15** | **+1.23** |
-| Vanilla SC-GS (16M deform-MLP) | 25.75 | — | — (gap 6.49) |
+| + K=200 capacity | 19.26 | +0.15 | +1.23 |
+| + K=300 capacity | **19.32** | **+0.06** | **+1.29** |
+| Vanilla SC-GS (16M deform-MLP) | 25.75 | — | — (gap 6.43) |
 
 Reproduce final:
 ```bash
