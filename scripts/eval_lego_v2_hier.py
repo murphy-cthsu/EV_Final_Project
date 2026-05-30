@@ -25,7 +25,7 @@ from arguments import PipelineParams  # noqa: E402
 from argparse import ArgumentParser as _A  # noqa: E402
 from utils.graphics_utils import focal2fov, fov2focal  # noqa: E402
 
-CANON = REPO / "outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply"
+CANON_DEFAULT = REPO / "outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply"
 
 
 def aa2mat_np(aa):
@@ -46,6 +46,8 @@ def psnr(a, b):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--label", required=True)
+    p.add_argument("--canon_ply", default=None,
+                   help="canonical ply path (auto-detect from state config if omitted)")
     p.add_argument("--save_renders", action="store_true")
     args = p.parse_args()
 
@@ -54,10 +56,32 @@ def main():
     K, T_train, _ = trans.shape
     have_scale = "scale" in s.files
     scale_per_kt = s["scale"] if have_scale else None
-    print(f"[eval-v2] label={args.label}  K={K}  T_train={T_train}  scale={have_scale}")
+    have_xyz_res = "xyz_residual" in s.files
+    xyz_res_kt = s["xyz_residual"] if have_xyz_res else None
+    arm_idx_res = s["arm_idx_for_residual"] if "arm_idx_for_residual" in s.files else None
+    print(f"[eval-v2] label={args.label}  K={K}  T_train={T_train}  scale={have_scale}  xyz_res={have_xyz_res}")
 
-    g = GaussianModel(3, fea_dim=0, with_motion_mask=False)
-    g.load_ply(str(CANON), og_number_points=0)
+    # Resolve canon: CLI > state config > default
+    if args.canon_ply:
+        canon_path = Path(args.canon_ply)
+    elif "config" in s.files:
+        cfg = s["config"].item() if hasattr(s["config"], "item") else s["config"]
+        canon_path = Path(cfg["canon_ply"]) if isinstance(cfg, dict) and cfg.get("canon_ply") else CANON_DEFAULT
+    else:
+        canon_path = CANON_DEFAULT
+    print(f"[eval-v2] canon={canon_path}")
+
+    g = None
+    for fdim in (8, 2, 0):
+        try:
+            g = GaussianModel(3, fea_dim=fdim, with_motion_mask=False)
+            g.load_ply(str(canon_path), og_number_points=0)
+            print(f"[eval-v2] loaded with fea_dim={fdim}")
+            break
+        except (IndexError, RuntimeError, ValueError):
+            g = None
+    if g is None:
+        raise RuntimeError(f"can't load canonical {canon_path}")
     xyz_canon = g.get_xyz.detach().cpu().numpy()
     N = xyz_canon.shape[0]
     print(f"[eval-v2] canonical N={N}")
@@ -97,6 +121,9 @@ def main():
         weighted = (lbs[..., None] * new_per).sum(axis=1)
         w_total = lbs.sum(axis=1, keepdims=True).clip(min=0, max=1)
         new_xyz = weighted + (1 - w_total) * xyz_canon
+        # Apply per-Gaussian per-time XYZ residual if available
+        if have_xyz_res and arm_idx_res is not None and len(arm_idx_res) > 0:
+            new_xyz[arm_idx_res] = new_xyz[arm_idx_res] + xyz_res_kt[:, tl, :]
         d_xyz_t = torch.from_numpy((new_xyz - xyz_canon).astype(np.float32)).cuda()
         d_rot = torch.zeros(N, 4, device="cuda") - torch.tensor([1, 0, 0, 0], device="cuda")
         d_sc = torch.zeros(N, 3, device="cuda")

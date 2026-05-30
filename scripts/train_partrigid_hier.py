@@ -87,7 +87,8 @@ def kmeans_simple(x: np.ndarray, K: int, n_iter: int = 50, seed: int = 0):
 class HierarchicalPartRigidModel(nn.Module):
     def __init__(self, T: int, K_arm: int, arm_centers: torch.Tensor,
                  sub_trans_init: torch.Tensor, color_tint: bool = False,
-                 per_time_scale: bool = False):
+                 per_time_scale: bool = False,
+                 xyz_residual_n: int = 0):
         super().__init__()
         self.T = T
         self.K = K_arm
@@ -106,6 +107,10 @@ class HierarchicalPartRigidModel(nn.Module):
         self.per_time_scale_enabled = per_time_scale
         if per_time_scale:
             self.scale = nn.Parameter(torch.zeros(K_arm, T, 3, dtype=torch.float32))
+        # Per-Gaussian per-time XYZ residual (only for arm Gaussians)
+        self.xyz_residual_enabled = xyz_residual_n > 0
+        if self.xyz_residual_enabled:
+            self.xyz_residual = nn.Parameter(torch.zeros(xyz_residual_n, T, 3, dtype=torch.float32))
 
     def deform_arm(self, t: int, arm_xyz: torch.Tensor, arm_weights: torch.Tensor) -> torch.Tensor:
         """LBS over K clusters with canonical fallback for sub-unity weights.
@@ -180,6 +185,15 @@ def main():
     p.add_argument("--lr_scale", type=float, default=1e-3)
     p.add_argument("--lam_scale_smooth", type=float, default=1.0,
                    help="Temporal smoothness for per-time scale residual")
+    p.add_argument("--use_xyz_residual", action="store_true",
+                   help="Per-Gaussian per-time XYZ residual (+N_arm*T*3 DOF). "
+                        "Adds local micro-deformation on top of cluster SE(3). Directly "
+                        "addresses bucket streaking when SE(3)+scale is insufficient.")
+    p.add_argument("--lr_xyz_res", type=float, default=5e-4)
+    p.add_argument("--lam_xyz_res_smooth", type=float, default=5.0,
+                   help="Temporal smoothness for per-Gaussian XYZ residual (high to prevent overfit)")
+    p.add_argument("--lam_xyz_res_l2", type=float, default=1.0,
+                   help="L2 regularizer on XYZ residual magnitude (keep small)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
@@ -188,14 +202,25 @@ def main():
     out_dir = REPO_ROOT / "outputs/custom" / f"partrigid_{args.label}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ===== Load canonical Gaussians (frozen) =====
-    print(f"[hier] loading canonical")
-    gaussians = GaussianModel(3, fea_dim=2, with_motion_mask=False)
+    # ===== Resolve paths (CLI overrides) + load canonical Gaussians (frozen) =====
     CANON_PLY = Path(args.canon_ply) if args.canon_ply else CANON_PLY_DEFAULT
     PART_DIR  = Path(args.part_dir)  if args.part_dir  else PART_DIR_DEFAULT
     SCENE     = Path(args.scene_dir) if args.scene_dir else SCENE_DEFAULT
     print(f"[hier] CANON={CANON_PLY.name}  PART={PART_DIR.name}  SCENE={SCENE.name}")
-    gaussians.load_ply(str(CANON_PLY), og_number_points=0)
+    print(f"[hier] loading canonical")
+    # Try fea_dim=8 then 2 then 0 (different canonicals have different feature dims)
+    gaussians = None
+    for fdim in (8, 2, 0):
+        try:
+            g = GaussianModel(3, fea_dim=fdim, with_motion_mask=False)
+            g.load_ply(str(CANON_PLY), og_number_points=0)
+            gaussians = g
+            print(f"[hier] loaded canonical with fea_dim={fdim}")
+            break
+        except (IndexError, RuntimeError, ValueError):
+            continue
+    if gaussians is None:
+        raise RuntimeError(f"failed to load canonical {CANON_PLY}")
     for attr in ["_xyz", "_features_dc", "_features_rest",
                  "_scaling", "_rotation", "_opacity"]:
         if hasattr(gaussians, attr):
@@ -252,11 +277,19 @@ def main():
     arm_trans_global = centroid_3d_t[:, 0] - centroid_3d_t[0, 0]  # (T, 3) for the WHOLE arm
     sub_trans_init = arm_trans_global.unsqueeze(0).expand(args.k_arm, T, 3).contiguous()  # (K, T, 3)
 
+    # Index arm Gaussians (lbs sum > 1e-4) for per-Gaussian XYZ residual
+    nontrivial_mask_np = (lbs_weights.sum(1) > 1e-4).cpu().numpy()
+    arm_idx_for_residual = np.where(nontrivial_mask_np)[0]
+    N_arm_residual = len(arm_idx_for_residual)
+    arm_idx_tensor = torch.from_numpy(arm_idx_for_residual).long().to(args.device)
+    print(f"[hier] arm Gaussians eligible for XYZ residual: {N_arm_residual}")
+
     model = HierarchicalPartRigidModel(T=T, K_arm=args.k_arm,
                                         arm_centers=arm_centers_t,
                                         sub_trans_init=sub_trans_init,
                                         color_tint=args.use_color_tint,
-                                        per_time_scale=args.use_per_time_scale).to(args.device)
+                                        per_time_scale=args.use_per_time_scale,
+                                        xyz_residual_n=N_arm_residual if args.use_xyz_residual else 0).to(args.device)
     param_groups = [
         {"params": [model.trans], "lr": args.lr_trans},
         {"params": [model.aa],    "lr": args.lr_rot},
@@ -265,6 +298,8 @@ def main():
         param_groups.append({"params": [model.color_tint], "lr": args.lr_color})
     if args.use_per_time_scale:
         param_groups.append({"params": [model.scale], "lr": args.lr_scale})
+    if args.use_xyz_residual:
+        param_groups.append({"params": [model.xyz_residual], "lr": args.lr_xyz_res})
     optim = torch.optim.Adam(param_groups)
 
     n_motion_dof = args.k_arm * T * 6
@@ -374,6 +409,11 @@ def main():
             new_xyz = new_xyz.clone()
             new_xyz[nontrivial] = new_pos
         d_xyz = new_xyz - xyz_canon
+        # Per-Gaussian per-time XYZ residual (only on arm-eligible Gaussians)
+        if args.use_xyz_residual:
+            d_xyz_clone = d_xyz.clone()
+            d_xyz_clone[arm_idx_tensor] = d_xyz_clone[arm_idx_tensor] + model.xyz_residual[:, t, :]
+            d_xyz = d_xyz_clone
         d_rotation = torch.zeros(N, 4, device=args.device)
         d_rotation = d_rotation - torch.tensor([1, 0, 0, 0], device=args.device)
         d_scaling = torch.zeros(N, 3, device=args.device)
@@ -422,6 +462,12 @@ def main():
         L_scale_smooth = torch.tensor(0.0, device=args.device)
         if args.use_per_time_scale:
             L_scale_smooth = ((model.scale[:, 1:, :] - model.scale[:, :-1, :]) ** 2).mean()
+        # Per-Gaussian XYZ residual: smoothness + L2 magnitude regularizers
+        L_xyz_res_smooth = torch.tensor(0.0, device=args.device)
+        L_xyz_res_l2 = torch.tensor(0.0, device=args.device)
+        if args.use_xyz_residual:
+            L_xyz_res_smooth = ((model.xyz_residual[:, 1:, :] - model.xyz_residual[:, :-1, :]) ** 2).mean()
+            L_xyz_res_l2 = (model.xyz_residual ** 2).mean()
 
         # ARAP-like: adjacent clusters should not differ too much
         L_arap = 0.0
@@ -471,7 +517,9 @@ def main():
                 args.lam_smooth * L_smooth + args.lam_arap * L_arap +
                 args.lam_photo_blur * L_photo +
                 args.lam_photo_smart * L_photo_smart +
-                args.lam_scale_smooth * L_scale_smooth)
+                args.lam_scale_smooth * L_scale_smooth +
+                args.lam_xyz_res_smooth * L_xyz_res_smooth +
+                args.lam_xyz_res_l2 * L_xyz_res_l2)
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -485,6 +533,7 @@ def main():
     state = {
         "trans": model.trans.detach().cpu().numpy(),
         "aa": model.aa.detach().cpu().numpy(),
+        "arm_idx_for_residual": arm_idx_for_residual if args.use_xyz_residual else np.array([]),
         "arm_centers": model.centers.detach().cpu().numpy(),
         "lbs_weights": lbs_weights.detach().cpu().numpy(),
         "arm_weights_global": arm_weights_global,
@@ -494,6 +543,8 @@ def main():
         state["color_tint"] = model.color_tint.detach().cpu().numpy()
     if args.use_per_time_scale:
         state["scale"] = model.scale.detach().cpu().numpy()
+    if args.use_xyz_residual:
+        state["xyz_residual"] = model.xyz_residual.detach().cpu().numpy()
     np.savez(out_dir / "partrigid_state.npz", **state)
     print(f"[hier] saved {out_dir}/partrigid_state.npz")
     return 0

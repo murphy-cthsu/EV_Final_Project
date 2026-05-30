@@ -57,8 +57,14 @@ def project_to_view(xyz, c2w, fov_x, H, W):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
 
-    g = GaussianModel(3, fea_dim=0, with_motion_mask=False)
-    g.load_ply(str(CANON), og_number_points=0)
+    # Try fea_dim=8 (SV4D-trained canonical has features); fall back to 0 if needed
+    try:
+        g = GaussianModel(3, fea_dim=8, with_motion_mask=False)
+        g.load_ply(str(CANON), og_number_points=0)
+    except (IndexError, RuntimeError, ValueError) as e:
+        print(f"[parts-v2] fea_dim=8 failed ({e}); retry with fea_dim=0")
+        g = GaussianModel(3, fea_dim=0, with_motion_mask=False)
+        g.load_ply(str(CANON), og_number_points=0)
     xyz = g.get_xyz.detach().cpu().numpy()
     N = xyz.shape[0]
     print(f"[parts-v2] canonical N={N}")
