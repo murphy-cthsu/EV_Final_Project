@@ -86,7 +86,8 @@ def kmeans_simple(x: np.ndarray, K: int, n_iter: int = 50, seed: int = 0):
 
 class HierarchicalPartRigidModel(nn.Module):
     def __init__(self, T: int, K_arm: int, arm_centers: torch.Tensor,
-                 sub_trans_init: torch.Tensor, color_tint: bool = False):
+                 sub_trans_init: torch.Tensor, color_tint: bool = False,
+                 per_time_scale: bool = False):
         super().__init__()
         self.T = T
         self.K = K_arm
@@ -99,6 +100,12 @@ class HierarchicalPartRigidModel(nn.Module):
         self.color_tint_enabled = color_tint
         if color_tint:
             self.color_tint = nn.Parameter(torch.zeros(T, 3, dtype=torch.float32))
+        # Optional per-(cluster, time) 3D scale residual — added to Gaussian
+        # _scaling via LBS-weighted blend. Addresses streaking artifact when
+        # canonical Gaussian shape doesn't track cluster rotation.
+        self.per_time_scale_enabled = per_time_scale
+        if per_time_scale:
+            self.scale = nn.Parameter(torch.zeros(K_arm, T, 3, dtype=torch.float32))
 
     def deform_arm(self, t: int, arm_xyz: torch.Tensor, arm_weights: torch.Tensor) -> torch.Tensor:
         """LBS over K clusters with canonical fallback for sub-unity weights.
@@ -160,6 +167,13 @@ def main():
     p.add_argument("--v5_render_dir", type=str,
                    default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
                    help="Per-(view, time) renders from the fits-all v5 canonical (§3)")
+    p.add_argument("--use_per_time_scale", action="store_true",
+                   help="Per-(cluster, time) 3D scale residual (+K*T*3 DOF). "
+                        "Lets Gaussians in each cluster stretch differently at each time. "
+                        "Addresses streaking when canonical shape doesn't track rotation.")
+    p.add_argument("--lr_scale", type=float, default=1e-3)
+    p.add_argument("--lam_scale_smooth", type=float, default=1.0,
+                   help="Temporal smoothness for per-time scale residual")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
@@ -231,13 +245,16 @@ def main():
     model = HierarchicalPartRigidModel(T=T, K_arm=args.k_arm,
                                         arm_centers=arm_centers_t,
                                         sub_trans_init=sub_trans_init,
-                                        color_tint=args.use_color_tint).to(args.device)
+                                        color_tint=args.use_color_tint,
+                                        per_time_scale=args.use_per_time_scale).to(args.device)
     param_groups = [
         {"params": [model.trans], "lr": args.lr_trans},
         {"params": [model.aa],    "lr": args.lr_rot},
     ]
     if args.use_color_tint:
         param_groups.append({"params": [model.color_tint], "lr": args.lr_color})
+    if args.use_per_time_scale:
+        param_groups.append({"params": [model.scale], "lr": args.lr_scale})
     optim = torch.optim.Adam(param_groups)
 
     n_motion_dof = args.k_arm * T * 6
@@ -335,6 +352,10 @@ def main():
         d_rotation = torch.zeros(N, 4, device=args.device)
         d_rotation = d_rotation - torch.tensor([1, 0, 0, 0], device=args.device)
         d_scaling = torch.zeros(N, 3, device=args.device)
+        # Per-(cluster, time) scale residual via LBS-weighted blend
+        if args.use_per_time_scale:
+            scale_blend = lbs_weights @ model.scale[:, t, :]      # (N, 3)
+            d_scaling = d_scaling + scale_blend
 
         # Tier 1 — rotation propagation: per-Gaussian quaternion from LBS-weighted
         # cluster rotations, applied via d_rotation_bias (multiplicative composition).
@@ -372,6 +393,10 @@ def main():
                    ((model.aa[:, 1:, :] - model.aa[:, :-1, :]) ** 2).mean()
         if args.use_color_tint:
             L_smooth = L_smooth + ((model.color_tint[1:] - model.color_tint[:-1]) ** 2).mean()
+        # Temporal smoothness for per-time scale (avoid jitter)
+        L_scale_smooth = torch.tensor(0.0, device=args.device)
+        if args.use_per_time_scale:
+            L_scale_smooth = ((model.scale[:, 1:, :] - model.scale[:, :-1, :]) ** 2).mean()
 
         # ARAP-like: adjacent clusters should not differ too much
         L_arap = 0.0
@@ -420,7 +445,8 @@ def main():
         loss = (args.lam_silh * L_silh + args.lam_traj * L_traj +
                 args.lam_smooth * L_smooth + args.lam_arap * L_arap +
                 args.lam_photo_blur * L_photo +
-                args.lam_photo_smart * L_photo_smart)
+                args.lam_photo_smart * L_photo_smart +
+                args.lam_scale_smooth * L_scale_smooth)
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -441,6 +467,8 @@ def main():
     }
     if args.use_color_tint:
         state["color_tint"] = model.color_tint.detach().cpu().numpy()
+    if args.use_per_time_scale:
+        state["scale"] = model.scale.detach().cpu().numpy()
     np.savez(out_dir / "partrigid_state.npz", **state)
     print(f"[hier] saved {out_dir}/partrigid_state.npz")
     return 0

@@ -78,6 +78,8 @@ def main() -> int:
     K = trans.shape[0]; T_train = trans.shape[1]
     have_color_tint = "color_tint" in state.files
     color_tint = state["color_tint"] if have_color_tint else None
+    have_scale = "scale" in state.files
+    scale_per_kt = state["scale"] if have_scale else None  # (K, T, 3)
     if "config" in state.files:
         cfg = state["config"].item() if hasattr(state["config"], "item") else state["config"]
         if isinstance(cfg, dict):
@@ -137,6 +139,9 @@ def main() -> int:
         d_xyz_t = torch.from_numpy(d_xyz_np).float().cuda()
         d_rotation = torch.zeros(N, 4, device="cuda") - torch.tensor([1, 0, 0, 0], device="cuda")
         d_scaling = torch.zeros(N, 3, device="cuda")
+        if have_scale:
+            scale_blend = lbs_w_t @ torch.from_numpy(scale_per_kt[:, t_lo, :]).float().cuda()  # (N, 3)
+            d_scaling = d_scaling + scale_blend
 
         d_rotation_bias = None
         if args.use_rot_prop:
