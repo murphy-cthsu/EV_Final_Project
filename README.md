@@ -45,7 +45,9 @@ Full 21-frame animation at view 0: [`runs_aux/gallery_3col_full/gallery_v0.gif`]
 | Hier K=3 + smart photo (v5-filter) | 18.28 | 378 | 100 s | smart filter unlocks gain |
 | Hier K=10 + smart photo 3× | 18.56 | 1,260 | 110 s | smart photo rescues K=10 |
 | Hier K=50 + smart photo 3× | 18.82 | 6,300 | 210 s | |
-| **Hier K=100 + smart photo 3× (final)** | **18.89** 🥇 | **12,600** | **347 s** | **+0.86 over baseline** |
+| Hier K=100 + smart photo 3× | 18.89 | 12,600 | 347 s | +0.86 over baseline |
+| Hier K=100 + smart + per-time scale | 19.11 | 18,900 | 380 s | per-time scale adds +0.22 |
+| **Hier K=200 + smart + scale (final)** | **19.26** 🥇 | **25,200** | **378 s** | **+1.23 over baseline** |
 | Vanilla SC-GS (16 M deform-MLP) | 25.75 | 16,000,000 | ~900 s | reference upper |
 
 **Engineering finding**: a one-line LeakyReLU patch to SC-GS's deform-MLP

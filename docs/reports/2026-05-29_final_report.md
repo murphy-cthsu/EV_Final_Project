@@ -649,6 +649,100 @@ python scripts/viz_final_comparison.py
 
 ---
 
+## 5.7 Per-time scale residual + semantic 2-stage (final mechanism push)
+
+Two more capacity expansions tried after §5.6:
+
+### 5.7.1 Semantic 2-stage curriculum (252 DOF, **abandoned**)
+
+3D K-means on arm Gaussians (split by distance to body pivot) → semantic
+3-part assignment: 40,719 body / 5,264 arm-shaft / 8,492 bucket.
+
+Stage 1: bucket-only SE(3) (freeze arm-shaft + body), 2k iter.
+Stage 2: joint bucket + shaft + ARAP coupling, 4k iter.
+
+Result: **18.30 dB** mean (252 DOF total). At t=0 marginally beats K=100
+(21.27 vs 21.22 dB — semantic init helps for non-extreme poses), but
+loses ~1 dB on extreme pose t=10 where the bucket needs more
+articulation flexibility. **Conclusion: capacity is the binding
+constraint at this DOF level, not motion-decomposition quality**.
+Approach abandoned in favor of high-capacity variants.
+
+(Note: SAM-2 video predictor was tried first for the semantic
+decomposition. Failed inconsistently across views due to uniform lego
+texture — view 0/1/3 OK, view 2/4 captured wrong region. Pivoted to
+3D K-means which was deterministic and gave clean 15/9/75% split.)
+
+### 5.7.2 Per-(cluster, time) 3D scale residual — **mechanism that wins**
+
+Added a learnable per-(cluster, time) 3D scale field to the hier model.
+Applied via LBS-weighted blend to each Gaussian's `d_scaling`, letting
+Gaussians in each cluster stretch/squash differently at each time.
+Addresses the visible streaking artifact where canonical Gaussian shape
+doesn't track cluster rotation.
+
+```python
+# in HierarchicalPartRigidModel
+self.scale = nn.Parameter(torch.zeros(K, T, 3))
+# in training loop, per Gaussian:
+d_scaling = lbs_weights @ scale[:, t, :]   # (N, 3)
+```
+
+DOF added: K × T × 3 (e.g., K=200 → 12,600).
+
+### 5.7.3 Final K-scaling × scale-residual ablation
+
+All variants use smart photometric 3× + lam_arap=1.0. Mean PSNR on
+scene00_masked full 105 frames.
+
+| Variant | DOF | PSNR | Δ vs prev best |
+|---|---:|---:|---:|
+| K=100 + smart 3× (§5.6 best) | 12,600 | 18.89 | — |
+| K=100 + smart 3× + rot_prop | 12,600 | 18.91 | +0.02 (noise) |
+| K=100 + smart 3× + per-time scale | **18,900** | **19.11** | **+0.22** ✓ |
+| K=100 + scale + rot_prop | 18,900 | 19.11 | 0 (rot subsumed) |
+| K=100 + scale + lam_scale_smooth 0.1 | 18,900 | 19.11 | 0 (smoothness not binding) |
+| **K=200 + smart 3× + per-time scale** | **25,200** | **19.26** | **+0.15** ✓ |
+
+Per-time scale is the second confirmed mechanism (smart photometric being
+the first). K-scaling above 100 still adds marginal gain when scale is
+enabled. Diminishing returns expected past K=200–300.
+
+### 5.7.4 Headline visual — K=200 + scale (final)
+
+![v=0 t=0 K=100 smart vs +scale](../../runs_aux/scale_result/tiles/v0_t00.png)
+
+t=0 (bucket up): 21.22 → 21.59 (+0.37). Body sharpens, bucket boundary
+crisp.
+
+![v=0 t=10 K=100 smart vs +scale](../../runs_aux/scale_result/tiles/v0_t10.png)
+
+t=10 (bucket forward): 17.47 → 17.60 (+0.13). Per-time scale allows the
+arm Gaussians to anisotropically stretch as the arm rotates — partial fix
+for the extreme-pose streak.
+
+Net total improvement, full method timeline:
+
+| Method | PSNR | Δ vs prev | Cum Δ vs original |
+|---|---:|---:|---:|
+| Original part-rigid v1 | 18.03 | — | 0 |
+| + smart photometric (v5-filtered L1) | 18.28 (K=3) | +0.25 | +0.25 |
+| + K-scaling (K=3 → K=100) | 18.89 | +0.61 | +0.86 |
+| + per-time scale residual | 19.11 (K=100) | +0.22 | +1.08 |
+| + K=200 capacity | **19.26** | **+0.15** | **+1.23** |
+| Vanilla SC-GS (16M deform-MLP) | 25.75 | — | — (gap 6.49) |
+
+Reproduce final:
+```bash
+python scripts/train_partrigid_hier.py --label hier_K200_smart_scale \
+    --k_arm 200 --lbs_K 8 --lam_arap 1.0 \
+    --lam_photo_smart 3.0 --use_per_time_scale --iterations 10000
+python scripts/eval_partrigid_hier.py --label hier_K200_smart_scale
+python scripts/viz_scale_result.py
+```
+
+---
+
 ## 6. Visualizations (where to look)
 
 All key result visualizations are pre-built and saved in the repo:
@@ -671,6 +765,9 @@ All key result visualizations are pre-built and saved in the repo:
 | `runs_aux/gallery_3col_full/{contact_sheet_t0.png, gallery_v0-4.gif, all_views_animation.gif}` | §5.2/5.3 3-column visual comparison: [clean ref nobase \| SV4D GT \| our part-rigid LBS], 105 frames |
 | `runs_aux/hier_smart_viz/tiles/v0_t{00,10,20}.png` + `gallery_v0.gif` | §5.6 4-column: [GT \| K=3 baseline \| K=3 + smart photo \| v5 filter weight] |
 | `runs_aux/final_comparison/{tiles/v0_t*.png, comparison_v0.gif, contact_sheet_5views_t0.png}` | §5.6 headline: original part-rigid baseline vs K=100 + smart photometric (our final result, +0.94 dB) |
+| `runs_aux/scale_result/{tiles/v0_t*.png, comparison_v0.gif}` | §5.7 K=100 smart vs K=100 + per-time scale (+0.22 dB mechanism) |
+| `runs_aux/2stage_eval/2stage_v1/{tiles/v0_t*.png, comparison_v0.gif}` | §5.7 semantic 2-stage curriculum vs K=100 (capacity test, abandoned at 252 DOF) |
+| `runs_aux/part_assignment/decomp_viz.png` | §5.7 3D K-means decomposition of arm into bucket + arm-shaft + body |
 | `outputs/custom/canonical_static_node/train/ours_5000/{renders,gt}/` | Per-view canonical renders |
 | `outputs/custom/scene00_v5_node/train/ours_30000/gifs/` | v5 fits-all-views GIFs (P0 reference) |
 
