@@ -223,6 +223,10 @@ def main():
                    help="L2 regularizer on XYZ residual magnitude (keep small)")
     p.add_argument("--lam_lpips", type=float, default=0.0,
                    help="LPIPS perceptual loss weight (sharpens edges, fixes blur from smart photo)")
+    p.add_argument("--canon_finetune", action="store_true",
+                   help="Unfreeze canonical scale/rotation/features for mild adaptation (Path 2)")
+    p.add_argument("--lr_canon", type=float, default=1e-4,
+                   help="Learning rate for canonical fine-tune (very small)")
     p.add_argument("--use_rot_residual", action="store_true",
                    help="Per-Gaussian per-time ROTATION residual axis-angle (+N_arm*T*3 DOF). "
                         "Rotates each arm Gaussian's orientation to track arm rotation. "
@@ -263,6 +267,12 @@ def main():
                  "_scaling", "_rotation", "_opacity"]:
         if hasattr(gaussians, attr):
             getattr(gaussians, attr).requires_grad_(False)
+    # Path 2: unfreeze scale/rotation/features for canonical fine-tune
+    if args.canon_finetune:
+        gaussians._scaling.requires_grad_(True)
+        gaussians._rotation.requires_grad_(True)
+        gaussians._features_dc.requires_grad_(True)
+        print(f"[hier] Path 2: canonical fine-tune ENABLED (scale/rot/features unfrozen, lr={args.lr_canon})")
     xyz_canon = gaussians.get_xyz.detach().to(args.device)
     N = xyz_canon.shape[0]
 
@@ -346,6 +356,11 @@ def main():
         param_groups.append({"params": [model.xyz_residual], "lr": args.lr_xyz_res})
     if args.use_rot_residual:
         param_groups.append({"params": [model.rot_residual], "lr": args.lr_rot_res})
+    # Path 2: canonical fine-tune params with small lr
+    if args.canon_finetune:
+        param_groups.append({"params": [gaussians._scaling], "lr": args.lr_canon})
+        param_groups.append({"params": [gaussians._rotation], "lr": args.lr_canon})
+        param_groups.append({"params": [gaussians._features_dc], "lr": args.lr_canon})
     optim = torch.optim.Adam(param_groups)
 
     n_motion_dof = args.k_arm * T * 6
