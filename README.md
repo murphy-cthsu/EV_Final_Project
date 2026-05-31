@@ -1,24 +1,50 @@
 # EV Final Project — Structure / Motion Decoupled 4D Gaussian Reconstruction from VGM Supervision
 
-> **Final project**, NTU 113-2 EV, 2026-05-29
-> Full report: [`docs/reports/2026-05-29_final_report.md`](docs/reports/2026-05-29_final_report.md)
+> **Final project**, NTU 113-2 EV, 2026-06-01 (Checkpoint 2)
+> Latest report: [`docs/reports/2026-06-01_checkpoint2_final.md`](docs/reports/2026-06-01_checkpoint2_final.md)
+> Earlier benchmark: [`docs/reports/2026-05-31_lego_v2_benchmark.md`](docs/reports/2026-05-31_lego_v2_benchmark.md)
+> Method design: [`docs/reports/2026-05-29_final_report.md`](docs/reports/2026-05-29_final_report.md)
 > Slide outline: [`docs/planning/2026-05-29_final_slides.md`](docs/planning/2026-05-29_final_slides.md)
 
-We study what happens when **SC-GS** (4D Gaussian splatting for monocular dynamic
-scenes) is supervised by **Video Generative Model (VGM) output** — specifically
-**SV4D 2.0**'s 5-view × 21-frame rendering of the D-NeRF *lego* scene — and
-propose a method that handles the resulting noise.
+We study **VGM-supervised 4D Gaussian Splatting** — when SC-GS is trained on
+SV4D 2.0's hallucinated multi-view video, vanilla joint-training breaks
+(Gaussian explosion). We propose **Structure / Motion Decoupled** training:
+freeze a clean canonical 3DGS, learn only motion via part-rigid SE(3) + LBS
++ per-Gaussian residual, with smart-photometric loss that filters VGM
+boundary noise.
+
+## 🏆 Headline result (lego_v2, eval vs independent d-3dgs clean GT)
+
+| Method | PSNR | Notes |
+|---|---:|---|
+| Vanilla SC-GS (16M deform-MLP) | **11.43 dB** | Broken — Gaussian explosion, fits noise |
+| **Phase 2 (ours, K=100 + smart photo α=16 + per-time scale + xyz residual)** | **20.40 dB** | **+8.97 dB**, 96% of architecture ceiling |
+| Architecture ceiling (train on clean GT directly) | 20.96 | Hard upper bound |
+
+Multi-metric eval (all wins ours):
+- LPIPS: 0.230 vs 0.412 (ours -0.18)
+- DINOv2 feature dist: ours -0.18
+- Foreground IoU: 0.762 vs 0.383 (ours +0.38)
+- **Motion-region IoU**: 0.528 vs 0.234 (ours +0.29 — model actually learned WHERE motion happens)
+- **Motion magnitude correlation**: 0.79 vs 0.38 (ours +0.41 — model matches HOW MUCH motion)
 
 ---
 
-## Headline visual
+## Headline visualization
 
-3-column gallery — **clean D-NeRF reference** vs **SV4D GT** (our training data)
-vs **our part-rigid LBS render** at 5 viewpoints, t = 0:
+### Animation comparison (per-view 21-frame GIFs)
 
-![3-col contact sheet at t=0](runs_aux/gallery_3col_full/contact_sheet_t0.png)
+`runs_aux/method_animations/` (10 GIFs, 5 views × 2 methods, 3-col [SV4D GT | d-3dgs clean | model]):
+- `vanilla_v{0-4}.gif` — vanilla SC-GS (spike explosion)
+- `ours_v{0-4}.gif` — Phase 2 ours (clean structure)
 
-Full 21-frame animation at view 0: [`runs_aux/gallery_3col_full/gallery_v0.gif`](runs_aux/gallery_3col_full/gallery_v0.gif)
+### Single keyframe (view 0, t=10)
+
+**Vanilla SC-GS**:
+![vanilla v0 t10](runs_aux/method_animations/frames_vanilla/v0_t10.png)
+
+**Ours (Phase 2 A1)**:
+![ours v0 t10](runs_aux/method_animations/frames_ours/v0_t10.png)
 
 ---
 
