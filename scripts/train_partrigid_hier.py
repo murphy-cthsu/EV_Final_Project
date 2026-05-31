@@ -221,6 +221,8 @@ def main():
                    help="Temporal smoothness for per-Gaussian XYZ residual (high to prevent overfit)")
     p.add_argument("--lam_xyz_res_l2", type=float, default=1.0,
                    help="L2 regularizer on XYZ residual magnitude (keep small)")
+    p.add_argument("--lam_lpips", type=float, default=0.0,
+                   help="LPIPS perceptual loss weight (sharpens edges, fixes blur from smart photo)")
     p.add_argument("--use_rot_residual", action="store_true",
                    help="Per-Gaussian per-time ROTATION residual axis-angle (+N_arm*T*3 DOF). "
                         "Rotates each arm Gaussian's orientation to track arm rotation. "
@@ -575,6 +577,23 @@ def main():
             err = (img - gt_rgb).abs().mean(dim=0)                    # (H, W)
             L_photo_smart = (err * fg_w).sum() / fg_w.sum().clamp(min=1)
 
+        # LPIPS perceptual loss (alex backbone, robust to small offsets + sharpens edges)
+        L_lpips = torch.tensor(0.0, device=args.device)
+        if args.lam_lpips > 0:
+            if not hasattr(args, "_lpips_model"):
+                import lpips
+                args._lpips_model = lpips.LPIPS(net="alex").to(args.device)
+                print(f"[hier] LPIPS model loaded")
+            gt_rgb = gt_rgbs[idx]
+            # mask to FG region to focus loss
+            fg = (gt_alpha > 0.5).float().unsqueeze(0).expand_as(img)
+            pred_fg = img * fg + (1 - fg)         # composite over white bg
+            gt_fg   = gt_rgb * fg + (1 - fg)
+            with torch.cuda.amp.autocast(enabled=False):
+                L_lpips = args._lpips_model(
+                    pred_fg.unsqueeze(0) * 2 - 1,
+                    gt_fg.unsqueeze(0) * 2 - 1).mean()
+
         loss = (args.lam_silh * L_silh + args.lam_traj * L_traj +
                 args.lam_smooth * L_smooth + args.lam_arap * L_arap +
                 args.lam_photo_blur * L_photo +
@@ -583,7 +602,8 @@ def main():
                 args.lam_xyz_res_smooth * L_xyz_res_smooth +
                 args.lam_xyz_res_l2 * L_xyz_res_l2 +
                 args.lam_rot_res_smooth * L_rot_res_smooth +
-                args.lam_rot_res_l2 * L_rot_res_l2)
+                args.lam_rot_res_l2 * L_rot_res_l2 +
+                args.lam_lpips * L_lpips)
         optim.zero_grad()
         loss.backward()
         optim.step()
