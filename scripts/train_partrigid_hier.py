@@ -111,6 +111,11 @@ class HierarchicalPartRigidModel(nn.Module):
         self.xyz_residual_enabled = xyz_residual_n > 0
         if self.xyz_residual_enabled:
             self.xyz_residual = nn.Parameter(torch.zeros(xyz_residual_n, T, 3, dtype=torch.float32))
+        # Per-Gaussian per-time ROTATION residual (axis-angle, only for arm Gaussians)
+        # Initialized at 0 → identity rotation
+        self.rot_residual_n = xyz_residual_n  # reuse for compat
+        self.rot_residual_enabled = False
+        # Will be lazily set up by main() if --use_rot_residual
 
     def deform_arm(self, t: int, arm_xyz: torch.Tensor, arm_weights: torch.Tensor) -> torch.Tensor:
         """LBS over K clusters with canonical fallback for sub-unity weights.
@@ -130,13 +135,30 @@ class HierarchicalPartRigidModel(nn.Module):
         return weighted + (1 - w_total) * arm_xyz
 
 
-def silhouette_loss(render_alpha, gt_alpha):
+def silhouette_loss(render_alpha, gt_alpha, outside_weight: float = 1.0):
+    """Silhouette loss with optional outside-mask down-weighting.
+
+    outside_weight=1.0 (default): symmetric penalty everywhere (legacy behavior).
+    outside_weight<1: penalty for rendering OUTSIDE gt_alpha mask is reduced.
+      Use case: when canonical contains structure (e.g., baseplate) that the
+      SAM-2 supervision mask excludes — we don't want silhouette gradient to
+      fight the canonical's existing geometry. GENERIC for any
+      "supervision-mask is subset of canonical-scene" mismatch.
+    """
     a = render_alpha.clamp(1e-6, 1 - 1e-6)
     g = gt_alpha.clamp(1e-6, 1 - 1e-6)
-    bce = -(g * a.log() + (1 - g) * (1 - a).log()).mean()
-    inter = (a * g).sum()
-    union = (a + g - a * g).sum()
-    return bce + (1 - inter / (union + 1e-6))
+    if outside_weight < 1.0:
+        fg = (gt_alpha > 0.5).float()
+        w = fg + (1 - fg) * outside_weight
+        bce = -((g * a.log() + (1 - g) * (1 - a).log()) * w).mean()
+        inter = (a * g).sum()
+        union = (w * (a + g - a * g)).sum()
+        return bce + (1 - inter / (union + 1e-6))
+    else:
+        bce = -(g * a.log() + (1 - g) * (1 - a).log()).mean()
+        inter = (a * g).sum()
+        union = (a + g - a * g).sum()
+        return bce + (1 - inter / (union + 1e-6))
 
 
 def main():
@@ -151,6 +173,11 @@ def main():
     p.add_argument("--lr_rot", type=float, default=5e-3)
     p.add_argument("--lr_color", type=float, default=1e-3)
     p.add_argument("--lam_silh", type=float, default=1.0)
+    p.add_argument("--silh_outside_weight", type=float, default=1.0,
+                   help="Weight for silhouette penalty OUTSIDE gt_alpha mask. "
+                        "Set to <1 (e.g., 0.1) when canonical has structure outside "
+                        "the SAM mask (e.g., baseplate not in mask) to avoid silhouette "
+                        "fighting canonical. GENERIC, not lego-specific.")
     p.add_argument("--lam_traj", type=float, default=0.1)
     p.add_argument("--lam_smooth", type=float, default=1.0)
     p.add_argument("--lam_arap", type=float, default=0.5,
@@ -194,6 +221,15 @@ def main():
                    help="Temporal smoothness for per-Gaussian XYZ residual (high to prevent overfit)")
     p.add_argument("--lam_xyz_res_l2", type=float, default=1.0,
                    help="L2 regularizer on XYZ residual magnitude (keep small)")
+    p.add_argument("--use_rot_residual", action="store_true",
+                   help="Per-Gaussian per-time ROTATION residual axis-angle (+N_arm*T*3 DOF). "
+                        "Rotates each arm Gaussian's orientation to track arm rotation. "
+                        "Should fix anisotropic streaking when bucket rotates.")
+    p.add_argument("--lr_rot_res", type=float, default=5e-4)
+    p.add_argument("--lam_rot_res_smooth", type=float, default=5.0,
+                   help="Temporal smoothness for per-Gaussian rotation residual")
+    p.add_argument("--lam_rot_res_l2", type=float, default=2.0,
+                   help="L2 regularizer on rotation residual magnitude (keep rotations small)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
@@ -284,12 +320,18 @@ def main():
     arm_idx_tensor = torch.from_numpy(arm_idx_for_residual).long().to(args.device)
     print(f"[hier] arm Gaussians eligible for XYZ residual: {N_arm_residual}")
 
+    n_residual_pool = N_arm_residual if (args.use_xyz_residual or args.use_rot_residual) else 0
     model = HierarchicalPartRigidModel(T=T, K_arm=args.k_arm,
                                         arm_centers=arm_centers_t,
                                         sub_trans_init=sub_trans_init,
                                         color_tint=args.use_color_tint,
                                         per_time_scale=args.use_per_time_scale,
-                                        xyz_residual_n=N_arm_residual if args.use_xyz_residual else 0).to(args.device)
+                                        xyz_residual_n=n_residual_pool).to(args.device)
+    # Set up rotation residual parameter (axis-angle, N_arm × T × 3)
+    if args.use_rot_residual:
+        model.rot_residual = nn.Parameter(
+            torch.zeros(N_arm_residual, T, 3, dtype=torch.float32).to(args.device))
+        model.rot_residual_enabled = True
     param_groups = [
         {"params": [model.trans], "lr": args.lr_trans},
         {"params": [model.aa],    "lr": args.lr_rot},
@@ -300,6 +342,8 @@ def main():
         param_groups.append({"params": [model.scale], "lr": args.lr_scale})
     if args.use_xyz_residual:
         param_groups.append({"params": [model.xyz_residual], "lr": args.lr_xyz_res})
+    if args.use_rot_residual:
+        param_groups.append({"params": [model.rot_residual], "lr": args.lr_rot_res})
     optim = torch.optim.Adam(param_groups)
 
     n_motion_dof = args.k_arm * T * 6
@@ -432,6 +476,19 @@ def main():
             identity_q = torch.tensor([1.0, 0.0, 0.0, 0.0], device=args.device)
             q_blend = q_blend + body_w * identity_q
             d_rotation_bias = q_blend / q_blend.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        # Per-Gaussian rotation residual (axis-angle → quaternion, only arm Gaussians)
+        if args.use_rot_residual:
+            q_res = axis_angle_to_quaternion(model.rot_residual[:, t, :])  # (N_arm, 4)
+            identity_q = torch.tensor([1.0, 0.0, 0.0, 0.0], device=args.device)
+            q_full = identity_q.unsqueeze(0).expand(N, 4).clone()
+            q_full[arm_idx_tensor] = q_res
+            if d_rotation_bias is None:
+                d_rotation_bias = q_full
+            else:
+                # Compose: q_full * d_rotation_bias (quaternion multiplication)
+                from scene.gaussian_model import quaternion_multiply
+                d_rotation_bias = quaternion_multiply(q_full, d_rotation_bias)
+                d_rotation_bias = d_rotation_bias / d_rotation_bias.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 
         # Optional color tint
         if args.use_color_tint:
@@ -445,7 +502,7 @@ def main():
         img = pkg["render"]
         alpha = pkg["alpha"]
         gt_alpha = gt_alphas[idx]
-        L_silh = silhouette_loss(alpha[0], gt_alpha)
+        L_silh = silhouette_loss(alpha[0], gt_alpha, outside_weight=args.silh_outside_weight)
 
         # Trajectory loss: union of all clusters' centroid should track target
         target = centroid_3d_t[t, 0]
@@ -468,6 +525,11 @@ def main():
         if args.use_xyz_residual:
             L_xyz_res_smooth = ((model.xyz_residual[:, 1:, :] - model.xyz_residual[:, :-1, :]) ** 2).mean()
             L_xyz_res_l2 = (model.xyz_residual ** 2).mean()
+        L_rot_res_smooth = torch.tensor(0.0, device=args.device)
+        L_rot_res_l2 = torch.tensor(0.0, device=args.device)
+        if args.use_rot_residual:
+            L_rot_res_smooth = ((model.rot_residual[:, 1:, :] - model.rot_residual[:, :-1, :]) ** 2).mean()
+            L_rot_res_l2 = (model.rot_residual ** 2).mean()
 
         # ARAP-like: adjacent clusters should not differ too much
         L_arap = 0.0
@@ -519,7 +581,9 @@ def main():
                 args.lam_photo_smart * L_photo_smart +
                 args.lam_scale_smooth * L_scale_smooth +
                 args.lam_xyz_res_smooth * L_xyz_res_smooth +
-                args.lam_xyz_res_l2 * L_xyz_res_l2)
+                args.lam_xyz_res_l2 * L_xyz_res_l2 +
+                args.lam_rot_res_smooth * L_rot_res_smooth +
+                args.lam_rot_res_l2 * L_rot_res_l2)
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -545,6 +609,8 @@ def main():
         state["scale"] = model.scale.detach().cpu().numpy()
     if args.use_xyz_residual:
         state["xyz_residual"] = model.xyz_residual.detach().cpu().numpy()
+    if args.use_rot_residual:
+        state["rot_residual"] = model.rot_residual.detach().cpu().numpy()
     np.savez(out_dir / "partrigid_state.npz", **state)
     print(f"[hier] saved {out_dir}/partrigid_state.npz")
     return 0

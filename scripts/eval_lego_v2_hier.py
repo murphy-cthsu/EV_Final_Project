@@ -58,8 +58,10 @@ def main():
     scale_per_kt = s["scale"] if have_scale else None
     have_xyz_res = "xyz_residual" in s.files
     xyz_res_kt = s["xyz_residual"] if have_xyz_res else None
+    have_rot_res = "rot_residual" in s.files
+    rot_res_kt = s["rot_residual"] if have_rot_res else None
     arm_idx_res = s["arm_idx_for_residual"] if "arm_idx_for_residual" in s.files else None
-    print(f"[eval-v2] label={args.label}  K={K}  T_train={T_train}  scale={have_scale}  xyz_res={have_xyz_res}")
+    print(f"[eval-v2] label={args.label}  K={K}  T_train={T_train}  scale={have_scale}  xyz_res={have_xyz_res}  rot_res={have_rot_res}")
 
     # Resolve canon: CLI > state config > default
     if args.canon_ply:
@@ -130,12 +132,25 @@ def main():
         if have_scale:
             scale_blend = lbs @ scale_per_kt[:, tl, :]
             d_sc = torch.from_numpy(scale_blend.astype(np.float32)).cuda()
+        # Per-Gaussian rotation residual → d_rotation_bias
+        d_rot_bias = None
+        if have_rot_res and arm_idx_res is not None and len(arm_idx_res) > 0:
+            aa_res = rot_res_kt[:, tl, :]  # (N_arm, 3) axis-angle
+            theta = np.linalg.norm(aa_res, axis=-1, keepdims=True).clip(min=1e-8)
+            axis = aa_res / theta
+            half = theta * 0.5
+            q_res = np.concatenate([np.cos(half), axis * np.sin(half)], axis=-1)  # (N_arm, 4)
+            q_full = np.zeros((N, 4), dtype=np.float32)
+            q_full[:, 0] = 1.0  # identity
+            q_full[arm_idx_res] = q_res.astype(np.float32)
+            d_rot_bias = torch.from_numpy(q_full).cuda()
 
         cam = SCGSCamera(colmap_id=0, R=R_cam, T=Tcam, FoVx=fov_x, FoVy=FovY,
                          image=torch.zeros(3, H, W).cuda(), gt_alpha_mask=None,
                          image_name="x", uid=0, fid=torch.tensor(0.0).float())
         with torch.no_grad():
-            pkg = render(cam, g, pipe, bg, d_xyz=d_xyz_t, d_rotation=d_rot, d_scaling=d_sc, d_rot_as_res=True)
+            pkg = render(cam, g, pipe, bg, d_xyz=d_xyz_t, d_rotation=d_rot, d_scaling=d_sc,
+                         d_rot_as_res=True, d_rotation_bias=d_rot_bias)
         img = torch.clamp(pkg["render"], 0, 1).cpu().numpy().transpose(1, 2, 0)
 
         # SV4D GT
