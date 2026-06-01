@@ -46,6 +46,8 @@ def psnr(a, b):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--label", required=True)
+    p.add_argument("--scene", default="lego_v2",
+                   help="dataset+gt name under data/custom/<scene> and outputs/custom/<scene>_d3dgs_ref")
     p.add_argument("--canon_ply", default=None,
                    help="canonical ply path (auto-detect from state config if omitted)")
     p.add_argument("--save_renders", action="store_true")
@@ -88,8 +90,8 @@ def main():
     N = xyz_canon.shape[0]
     print(f"[eval-v2] canonical N={N}")
 
-    scene_dir = REPO / "data/custom/lego_v2"
-    d3dgs_dir = REPO / "outputs/custom/lego_v2_d3dgs_ref/renders"
+    scene_dir = REPO / "data/custom" / args.scene
+    d3dgs_dir = REPO / "outputs/custom" / f"{args.scene}_d3dgs_ref" / "renders"
     meta_train = json.loads((scene_dir / "transforms_train.json").read_text())
     meta_test = json.loads((scene_dir / "transforms_test.json").read_text())
     all_frames = meta_train["frames"] + meta_test["frames"]

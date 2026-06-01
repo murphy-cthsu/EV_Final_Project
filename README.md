@@ -1,310 +1,334 @@
 # EV Final Project — Structure / Motion Decoupled 4D Gaussian Reconstruction from VGM Supervision
 
-> **Final project**, NTU 113-2 EV, 2026-06-01 (Checkpoint 2)
-> Latest report: [`docs/reports/2026-06-01_checkpoint2_final.md`](docs/reports/2026-06-01_checkpoint2_final.md)
-> Earlier benchmark: [`docs/reports/2026-05-31_lego_v2_benchmark.md`](docs/reports/2026-05-31_lego_v2_benchmark.md)
-> Method design: [`docs/reports/2026-05-29_final_report.md`](docs/reports/2026-05-29_final_report.md)
-> Slide outline: [`docs/planning/2026-05-29_final_slides.md`](docs/planning/2026-05-29_final_slides.md)
-
-We study **VGM-supervised 4D Gaussian Splatting** — when SC-GS is trained on
-SV4D 2.0's hallucinated multi-view video, vanilla joint-training breaks
-(Gaussian explosion). We propose **Structure / Motion Decoupled** training:
-freeze a clean canonical 3DGS, learn only motion via part-rigid SE(3) + LBS
-+ per-Gaussian residual, with smart-photometric loss that filters VGM
-boundary noise.
-
-## 🏆 Headline result (lego_v2, eval vs independent d-3dgs clean GT)
-
-| Method | PSNR | Notes |
-|---|---:|---|
-| Vanilla SC-GS (16M deform-MLP) | **11.43 dB** | Broken — Gaussian explosion, fits noise |
-| **Phase 2 (ours, K=100 + smart photo α=16 + per-time scale + xyz residual)** | **20.40 dB** | **+8.97 dB**, 96% of architecture ceiling |
-| Architecture ceiling (train on clean GT directly) | 20.96 | Hard upper bound |
-
-Multi-metric eval (all wins ours):
-- LPIPS: 0.230 vs 0.412 (ours -0.18)
-- DINOv2 feature dist: ours -0.18
-- Foreground IoU: 0.762 vs 0.383 (ours +0.38)
-- **Motion-region IoU**: 0.528 vs 0.234 (ours +0.29 — model actually learned WHERE motion happens)
-- **Motion magnitude correlation**: 0.79 vs 0.38 (ours +0.41 — model matches HOW MUCH motion)
+> NTU 113-2 EV Final Project · last updated 2026-06-01
+> Latest PI checkpoint: [`meetTW_checkpoint_0601/checkpoint_0601.md`](meetTW_checkpoint_0601/checkpoint_0601.md)
+> Method survey (all 24 attempts): [`docs/reports/2026-06-01_method_survey.md`](docs/reports/2026-06-01_method_survey.md)
+> Fairness experiments: [`docs/reports/2026-06-01_fairness_experiments.md`](docs/reports/2026-06-01_fairness_experiments.md)
 
 ---
 
-## Headline visualization
+## 🏆 Headline (lego_v2, eval vs an independent d-3dgs clean GT)
 
-### Animation comparison (per-view 21-frame GIFs)
-
-`runs_aux/method_animations/` (10 GIFs, 5 views × 2 methods, 3-col [SV4D GT | d-3dgs clean | model]):
-- `vanilla_v{0-4}.gif` — vanilla SC-GS (spike explosion)
-- `ours_v{0-4}.gif` — Phase 2 ours (clean structure)
-
-### Single keyframe (view 0, t=10)
-
-**Vanilla SC-GS**:
-![vanilla v0 t10](runs_aux/method_animations/frames_vanilla/v0_t10.png)
-
-**Ours (Phase 2 A1)**:
-![ours v0 t10](runs_aux/method_animations/frames_ours/v0_t10.png)
-
----
-
-## Results table
-
-### Phase 1 — Within-framework extension (CVCG + frequency curriculum)
-
-| Split | Method | PSNR | # Gaussians | 3D-consistency |
-|---|---|---:|---:|---:|
-| View-split | vanilla SC-GS | 13.10 | 96,309 | 47.71% |
-| View-split | **+C3+CVCG (fast)** | **13.61** (+0.51) | **43,664** (½×) | **49.43%** (+1.72 pp) |
-| Temporal-split | vanilla SC-GS | 25.75 | — | — |
-| Temporal-split | **+C3+CVCG (slow)** | **27.33** (+1.58) | — | — |
-
-### Phase 2 — Structure / motion decoupled (the headline contribution)
-
-| Method | PSNR | DOF | Train time | Notes |
-|---|---:|---:|---:|---|
-| Static canonical (no motion) | 15.91 | 0 | — | baseline floor |
-| Part-rigid v1 (hard ID) | 18.03 | 126 | 35 s | original |
-| LBS (soft per-Gaussian weights) | 17.97 | 126 | 35 s | one-arm |
-| Hier K=3 (3 sub-parts, ARAP) | 17.98 | 378 | 92 s | after LBS bug fix |
-| Hier K=10 (no smart photo) | 17.14 | 1,260 | 132 s | over-fragments |
-| Hier K=3 + smart photo (v5-filter) | 18.28 | 378 | 100 s | smart filter unlocks gain |
-| Hier K=10 + smart photo 3× | 18.56 | 1,260 | 110 s | smart photo rescues K=10 |
-| Hier K=50 + smart photo 3× | 18.82 | 6,300 | 210 s | |
-| Hier K=100 + smart photo 3× | 18.89 | 12,600 | 347 s | +0.86 over baseline |
-| Hier K=100 + smart + per-time scale | 19.11 | 18,900 | 380 s | per-time scale adds +0.22 |
-| Hier K=200 + smart + scale | 19.26 | 25,200 | 378 s | +1.23 over baseline |
-| **Hier K=300 + smart + scale (final)** | **19.32** 🥇 | **37,800** | **652 s** | **+1.29 over baseline** |
-| Vanilla SC-GS (16 M deform-MLP) | 25.75 | 16,000,000 | ~900 s | reference upper |
-
-**Engineering finding**: a one-line LeakyReLU patch to SC-GS's deform-MLP
-recovers training on sparse-time multi-view data (PSNR 17.39 → 31.79).
-
-### Diagnostic — VGM cross-render to clean reference (§5.5)
-
-| Fix | PSNR ceiling | Δ |
+| Method | PSNR vs clean GT | Δ |
 |---|---:|---:|
-| Naive matched-fid | 12.19 dB | — |
-| + baseplate Gaussian removal | 12.35 | +0.16 |
-| + per-frame shift correction | 12.12 | −0.22 |
+| Vanilla SC-GS (16M deform-MLP, joint train) | 11.43 dB | — |
+| **Ours (Phase 2, A1)** | **20.40 dB** | **+8.97** |
+| Architecture ceiling (ours trained on clean GT) | 20.96 dB | +0.56 over ours |
 
-→ Clean D-NeRF 4D-GS rendered at our SV4D cameras **cannot serve as quantitative
-GT**. SV4D rewrites both the world transform and the animation timing
-(monotonic D-NeRF arc vs V-shape SV4D cycle).
+→ We are at **96 % of the architectural ceiling** under noisy VGM supervision.
 
 ---
 
-## Key visualizations (all embedded inline)
+## 1. Core mechanism (read this first)
 
-### Per-view VGM artifact heatmap (§3)
+The problem: when SC-GS is supervised with **SV4D 2.0** multi-view video (a video generative model's output), joint structure + motion training breaks — the Gaussians absorb VGM hallucination noise into both, producing black-spike "explosions" at silhouette boundaries.
 
-![VGM per-view residual heatmap](runs_aux/vgm_artifact/heatmap.png)
+Our fix in one sentence: **freeze a clean canonical 3DGS and only learn motion on top of it, with a per-pixel "smart photometric" loss that automatically excludes VGM-hallucinated pixels.**
 
-View 1 is systematically 2× harder to fit. All 9 worst-residual cells originate
-from view 1. Boundary-localized.
-
-### Part assignment after LBS (§5.1)
-
-![Canonical Gaussians colored by LBS weight (red=arm, blue=body, purple=boundary)](runs_aux/part_assignment_anim/canonical_part_assignment_contact_sheet.png)
-
-5 views at t=0. **Red = arm (w > 0.9)**, **blue = body (w < 0.1)**, **purple =
-LBS boundary** (29,917 of 54,475 Gaussians sit in boundary regime — only 33
-fully snap to arm-rigid).
-
-### Clean-ref temporal alignment (§5.5)
-
-![Matched fid curves + PSNR ceiling](runs_aux/alignment_A/matched_curves.png)
-
-Left: matched fid is **V-shaped** (1.0 → 0.4 → 1.0) — confirms SV4D animation
-runs cyclically opposite to D-NeRF's monotonic arc.
-Right: best-match PSNR plateaus at ~12 dB across all views.
-
-### Static vs full-FG PSNR (§5.5)
-
-![Static-region PSNR vs full-FG](runs_aux/static_region_C/static_vs_full_bar.png)
-
-Restricting evaluation to the static body region (cabin + treads, masked from
-temporal-variance heatmap) lifts our part-rigid PSNR by **+2.8 dB**
-(13.28 → 16.06) — confirming ~3 dB of "structural fuzziness" was actually
-arm pose mismatch.
-
----
-
-## Method (one diagram)
+The full method is a 5-stage decoupled pipeline:
 
 ```
-SV4D 5-view mp4
-   ↓
-[multiview_videos_to_dnerf]   →  D-NeRF format
-[sam2_seg_multiview]          →  RGBA with SAM-2 mask
-[split_train_test / temporal] →  splits
-   ↓
-Stage A: train static 3DGS on t=0 only       → frozen canonical (54,475 G, PSNR 39.4)
-Stage B: per-pixel temporal-variance         → motion mask (~30% arm)
-Stage C: 5-view voting + K-means             → per-Gaussian part / sub-part id
-Stage D: 2D centroid → DLT triangulation     → 3D arm trajectory (T, 3), conf 0.94
-Stage E: train SE(3) for K sub-parts         → 126–1260 DOF, NO raw RGB loss
-         L = λ_silh · BCE+IoU
-           + λ_traj · ||centroid - target||² · conf
-           + λ_smooth · ||Δtrans||² + ||Δrot||²
-           + λ_arap · ||trans_k - trans_neighbor||²
+Monocular video ── SV4D 2.0 ──► Multi-view video {I_{v,t}}
+                                          │
+Clean canonical 3DGS ────────────────────►│ Stage A  freeze (xyz, scale, rot, SH, opacity)
+(from D-NeRF / static scan)               │
+                                          │ Stage B  motion mask per (v,t)
+                                          │        (temporal variance + Otsu)
+                                          │
+                                          │ Stage C  per-Gaussian part assignment
+                                          │        (multi-view voting → arm/body)
+                                          │
+                                          │ Stage D  3-D arm trajectory
+                                          │        (DLT triangulation of 2-D centroids)
+                                          │
+                                          │ Stage E  train motion module
+                                          │        K=100 cluster SE(3)  +  LBS (K_lbs=6)
+                                          │        + per-time per-cluster 3D-scale
+                                          │        + per-Gaussian XYZ residual
+                                          │        loss = silh + smart-photo + ARAP + smooth
+                                          ▼
+                                  Deformed 3DGS  G(t),  renderable from any view
 ```
 
----
+Key design choices and why they exist:
 
-## Current progress (2026-05-29)
+| Choice | Why |
+|---|---|
+| **Freeze canonical structure** (Stage A) | Joint training absorbs noise → explosion. Empirically tested with `_scale/_rot/_features` fine-tune (lr 1e-4) → **−1.11 dB**. Even microscopic drift hurts. |
+| **Part-rigid cluster SE(3) instead of free deform-MLP** | 885 K params (vs 16 M for SC-GS DeformModel) but **+8.51 dB** higher PSNR on the same canonical (`F2` fairness experiment). The inductive bias of structured cluster motion is doing the work, not the DOF. |
+| **Smart photometric filter**: `w = exp(-α · |I_sv4d − I_clean_ref|)` | Per-pixel VGM-noise confidence weighting. Pixels where SV4D disagrees with a known-clean reference get near-zero weight. Sharpness sweep: α=16 wins (20.40); α=8 baseline (20.28); α=4 worse (20.15). |
+| **LBS with canonical fallback for sub-unity weights** | Boundary Gaussians with `Σw < 1` keep their canonical position rather than collapsing. Bug fix yielded +3.20 dB. |
+| **8 k iterations, not more** | Loss plateaus by 8 k; 24 k overfits noise (**−0.34 dB**). |
 
-### ✅ Completed
-- **Engineering**: dying-ReLU patch (`third_party/SC-GS/utils/time_utils.py:418`)
-- **Phase 1**: CVCG + C3 wired into motionprior framework; full ablation (4 runs × 2 splits)
-- **Phase 2 method**: Stages A–E end-to-end on scene00 (5 views × 21 frames)
-- **8-variant photometric ablation** (refutes original "no-photometric" framing — bottleneck is capacity, not VGM noise)
-- **Hierarchical part-rigid** (K=3 with proper ARAP matches single-arm baseline; K=10 still over-fragments)
-- **Clean-ref cross-render diagnostic** (§5.5: V-shape + 12 dB ceiling + baseplate fix)
-- **Visualizations**: 3-col gallery (105 frames), part-assignment animation, contact sheets
-- **LBS deform bug fix**: canonical fallback for sub-unity weights (regression 14.78 → 17.98 dB)
-
-### 🚧 In progress
-- Per-cluster trajectory targets for K=10+ (further constrain sub-parts)
-- DINOv2 / foundation-feature loss (replace photometric entirely)
-- Per-time Gaussian scale (let canonical Gaussians stretch as arm rotates)
-
-### ✅ Just completed
-- **Smart photometric loss with v5-canonical-residual filter** (+0.30 to +1.42 dB depending on K)
-- **K-scaling ablation** (K=1 → 100, diminishing returns from K=50)
-- **LBS deform bug fix** — canonical fallback for sub-unity weights
-- **Headline visual** ([`runs_aux/final_comparison/`](runs_aux/final_comparison/))
-
-### ⏳ Deferred
-- Part-rigid data leak fix (training on full scene00 vs eval on split_t test)
-- 4D-SH appearance model beyond global color tint
-- Learnable skinning weights
+For the full design rationale (24 variants tried, all winners and all failures with one-line "why"), read [`docs/reports/2026-06-01_method_survey.md`](docs/reports/2026-06-01_method_survey.md).
 
 ---
 
-## Reproduce
-
-All commands assume the conda env `scgs` is active
-(`/home/cthsu/miniconda3/envs/scgs/bin/python`).
-
-### Data pipeline (one-shot)
+## 2. Environment
 
 ```bash
-python scripts/multiview_videos_to_dnerf.py \
-    --src_dir /mnt/HDD_1/cthsu/multiview_videos \
-    --out_dir data/custom/scene00
-python scripts/sam2_seg_multiview.py \
-    --src_dir /mnt/HDD_1/cthsu/multiview_videos \
-    --orig_scene_dir data/custom/scene00 \
-    --out_dir data/custom/scene00_masked
-python scripts/split_temporal.py \
-    --src_scene_dir data/custom/scene00_masked \
-    --out_dir data/custom/scene00_split_t
+# conda env (assumes already created — full bootstrap below)
+conda activate scgs   # /home/cthsu/miniconda3/envs/scgs/bin/python
+
+# vendored third-party (one-shot)
+bash scripts/bootstrap_third_party.sh
+
+# SAM-2 mask generation uses a separate env that has hydra+sam2
+conda activate motionprior
 ```
 
-### Phase 1 (CVCG/C3, SC-GS)
+Hardware: any single GPU with ≥ 16 GB (we use 1× RTX 3090). One full training run is ~4 min for lego_v2 / ~9 min for the 57-view datasets at 8 k iterations.
 
-```bash
-MOTIONPRIOR_C3_BANDS=10 MOTIONPRIOR_CVCG_BETA0=1.0 \
-    python third_party/SC-GS/train_gui.py \
-    -s data/custom/scene00_split_t -m outputs/custom/scene00_split_t_node \
-    --eval --is_blender --iterations 30000 ...
+---
+
+## 3. Data layout
+
+```
+data/custom/
+├── lego_v2/                       # 5 views × 21 frames (sparse, elev≈0°)
+│   ├── transforms_train.json
+│   ├── transforms_test.json
+│   └── {train,test}/r_{flat:05d}.png   # flat = v_idx × 21 + t
+├── lego_v3/                       # 57 views × 21 frames (7 elev × 9 azim, elev 0–30°)
+├── lego_v3_elev0/                 # 9 views × 21 frames (elev=0 subset of v3)
+├── hellwarrior/                   # 57 views × 21 frames
+└── hellwarrior_elev0/             # 9 views × 21 frames
+
+outputs/custom/                    # all training outputs (gitignored)
+├── lego_v2_canonical/             # frozen canonical 3DGS (114 k Gaussians)
+├── lego_v2_d3dgs_ref/renders/     # clean d-3dgs reference renders (eval-only)
+├── lego_v3_d3dgs_ref/renders/
+├── hellwarrior_d3dgs_ref/renders/
+└── partrigid_<label>/             # one dir per training run
+
+runs_aux/                          # diagnostics, figures, part-assignment data (gitignored)
+├── part_assignment_<dataset>/     # Stage C output (Gaussian → arm/body id)
+├── parts_motion_<dataset>/        # Stage B intermediate (motion masks)
+├── lego_v2_eval/<label>/          # eval output (PSNR JSON, optionally tile renders)
+└── method_animations/             # GIFs for reports
 ```
 
-### Phase 2 (structure/motion decoupled)
+---
+
+## 4. Reproduce the headline (lego_v2, ~5 min on one GPU)
+
+We assume the lego_v2 dataset, the canonical 3DGS, and d-3dgs reference renders are already on disk (they are on the lab machine). If you need to re-create them, see §6.
 
 ```bash
-# Stage A: frozen canonical
-python scripts/build_frame0_subset.py
+# (1) Stage B + C + D — motion mask, part assignment, arm trajectory.
+#     Reads SV4D mp4 + canonical PLY; writes runs_aux/part_assignment_lego_v2/
+python scripts/motion_parts_generic.py \
+    --dataset lego_v2 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply
+
+# (2) Stage E — train motion module (A1 best config).  ~4 min.
+python scripts/train_partrigid_hier.py \
+    --label lego_v2_A1 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply \
+    --part_dir runs_aux/part_assignment_lego_v2 \
+    --scene_dir data/custom/lego_v2 \
+    --v5_render_dir outputs/custom/lego_v2_d3dgs_ref/renders \
+    --use_test_too --k_arm 100 --lbs_K 6 --lam_arap 1.0 \
+    --lam_photo_smart 3.0 --photo_smart_alpha 16.0 \
+    --use_per_time_scale --use_xyz_residual --iterations 8000
+
+# (3) Eval — PSNR vs SV4D + vs clean d-3dgs GT.  Add --save_renders for view-0 tiles.
+python scripts/eval_lego_v2_hier.py \
+    --label lego_v2_A1 --scene lego_v2 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply
+```
+
+Expected output of (3):
+
+```
+[eval-v2] vs SV4D (supervision data) : mean=??.??  median=??.??
+[eval-v2] vs d-3dgs (CLEAN GT)        : mean=20.40  median=20.??
+[eval-v2] gap (d3dgs - sv4d): +?.??? dB
+  → d-3dgs higher means we're predicting closer to clean GT than to noisy training data
+```
+
+For the 57-view extensions, see §5.
+
+---
+
+## 5. Run on the 57-view datasets (lego_v3 / hellwarrior)
+
+These datasets stress test generality. Latest finding (2026-06-01): canonical–view alignment matters more than view count — using only the 9 elev=0° views beats all 57 views by **+3.85 dB** on lego_v3. See §3.7 of the [PI checkpoint](meetTW_checkpoint_0601/checkpoint_0601.md).
+
+### Convert SV4D output → D-NeRF format (one-shot)
+
+```bash
+# Reads /mnt/HDD_1/cthsu/<dataset>/ (mp4 + transforms_sv4d2_math.json) and writes data/custom/<dataset>/
+python scripts/lego_v3_hellwarrior_to_dnerf.py --dataset lego_v3
+python scripts/lego_v3_hellwarrior_to_dnerf.py --dataset hellwarrior
+
+# Extract clean d-3dgs reference renders (eval GT)
+python scripts/extract_d3dgs_renders_v3.py --dataset lego_v3
+python scripts/extract_d3dgs_renders_v3.py --dataset hellwarrior
+```
+
+### Build the elev=0 subset (the current best variant)
+
+```bash
+# Symlink elev=0 views (view_idx 0..8 are the elev=0 row in our flat indexing)
+python scripts/build_scene_dataset.py \
+    --src data/custom/lego_v3 --dst data/custom/lego_v3_elev0 --views 0,1,2,3,4,5,6,7,8
+
+python scripts/build_scene_dataset.py \
+    --src data/custom/hellwarrior --dst data/custom/hellwarrior_elev0 --views 0,1,2,3,4,5,6,7,8
+
+# Symlink the d-3dgs reference so eval can find it
+ln -sfn $(realpath outputs/custom/lego_v3_d3dgs_ref) outputs/custom/lego_v3_elev0_d3dgs_ref
+ln -sfn $(realpath outputs/custom/hellwarrior_d3dgs_ref) outputs/custom/hellwarrior_elev0_d3dgs_ref
+```
+
+### SAM-2 mask refinement (optional but helps silhouette quality)
+
+```bash
+# Needs the motionprior env (has hydra + sam2)
+conda activate motionprior
+python scripts/sam2_mask_legov3.py --dataset lego_v3_elev0
+conda activate scgs
+```
+
+### Train + eval
+
+```bash
+# Same A1 config as lego_v2, just point at the new dataset
+python scripts/motion_parts_generic.py \
+    --dataset lego_v3_elev0 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply
+
+python scripts/train_partrigid_hier.py \
+    --label lego_v3_elev0_A1 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply \
+    --part_dir runs_aux/part_assignment_lego_v3_elev0 \
+    --scene_dir data/custom/lego_v3_elev0 \
+    --v5_render_dir outputs/custom/lego_v3_d3dgs_ref/renders \
+    --use_test_too --k_arm 100 --lbs_K 6 --lam_arap 1.0 \
+    --lam_photo_smart 3.0 --photo_smart_alpha 16.0 \
+    --use_per_time_scale --use_xyz_residual --iterations 8000
+
+python scripts/eval_lego_v2_hier.py \
+    --label lego_v3_elev0_A1 --scene lego_v3_elev0 \
+    --canon_ply outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply \
+    --save_renders
+```
+
+Latest numbers:
+
+| Dataset | full 57-view | **elev=0 (9 views)** |
+|---|---:|---:|
+| lego_v3 | 15.82 dB | **19.67 dB** (+3.85) |
+| hellwarrior | 15.48 dB | 15.04 dB (−0.44, canonical-quality limited) |
+
+---
+
+## 6. Re-creating Stage A canonical from scratch (only if needed)
+
+The lego canonical comes from D-NeRF clean training; it's already on disk as
+`outputs/custom/lego_v2_canonical/point_cloud/iteration_0/point_cloud.ply`. To
+retrain for a new scene:
+
+```bash
+# Frame 0 subset
+python scripts/build_frame0_subset.py --dataset hellwarrior --out_dir data/custom/hellwarrior_frame0
+
+# Train static 3DGS on t=0 only
 python third_party/SC-GS/train_gui.py \
-    -s data/custom/scene00_frame0 -m outputs/custom/canonical_static_node \
-    --eval --is_blender --iterations 5000
+    -s data/custom/hellwarrior_frame0 \
+    -m outputs/custom/hellwarrior_canonical_node \
+    --eval --is_blender --iterations 20000
 
-# Stage B-D: motion mask + part assignment + trajectory
-python scripts/motion_parts.py
-python scripts/motion_parts_temporal.py
-python scripts/build_part_assignments_and_trajectory.py
-python scripts/build_part_lbs_weights.py
-
-# Stage E: part-rigid training (LBS variant)
-python scripts/train_partrigid_lbs.py --label lbs_photo1 --iterations 5000
-
-# Hierarchical (current best capacity expansion)
-python scripts/train_partrigid_hier.py --label hier_K3_fixed \
-    --k_arm 3 --lbs_K 2 --lam_arap 1.0 --iterations 5000
-python scripts/eval_partrigid_hier.py --label hier_K3_fixed --save_renders
+# Optional: hull prune to remove floaters
+python scripts/prune_canonical_hull.py \
+    --in_ply outputs/custom/hellwarrior_canonical_node/point_cloud/iteration_20000/point_cloud.ply \
+    --out_ply outputs/custom/hellwarrior_canonical_pruned/point_cloud/iteration_20000/point_cloud.ply
 ```
 
-### Diagnostics + visualizations
-
-```bash
-python scripts/characterize_vgm_artifact.py        # §3 per-view residual
-python scripts/gaussian_mv_consistency.py          # GT-free 3D-consistency
-python scripts/render_part_assignment_animation.py # part-color animation
-python scripts/build_3col_full_gallery.py          # clean | GT | ours
-
-# Clean-ref cross-render diagnostic (§5.5)
-python scripts/render_clean_ref_fine_grid.py --n_fid 100
-python scripts/match_sv4d_to_clean_ref.py
-python scripts/static_region_psnr.py
-python scripts/diagnose_clean_ref_align.py
-python scripts/render_clean_ref_fine_grid_nobase.py --z_min -0.15
-```
+Warning: canonical quality is the binding constraint. The hellwarrior canonical trained from SV4D-only (no clean source) regressed by −4.92 dB vs the D-NeRF-derived lego canonical. **If you don't have a clean source for the canonical, expect lower numbers**, and that's the open research question.
 
 ---
 
-## Repository layout
+## 7. Script cheat sheet
+
+| Script | What it does |
+|---|---|
+| `lego_v3_hellwarrior_to_dnerf.py` | SV4D mp4 + transforms_sv4d2_math.json → D-NeRF format (57-view variant) |
+| `lego_v2_to_dnerf.py` | Same as above but for the original 5-view lego_v2 layout |
+| `build_scene_dataset.py` | Subset a dataset by view list (used for elev=0 filter) |
+| `extract_d3dgs_renders_v3.py` | Pull d-3dgs reference video frames out of SV4D mp4s |
+| `sam2_mask_legov3.py` / `sam2_mask_lego_v2.py` | Refine alpha with SAM-2 video predictor |
+| `motion_parts_generic.py` | Stages B + C + D (motion mask, voting, DLT trajectory) for any dataset |
+| `train_partrigid_hier.py` | Stage E — the main training script |
+| `train_scgs_deform_frozen_canon.py` | F2 fairness baseline: SC-GS deform-MLP on top of our frozen canonical |
+| `eval_lego_v2_hier.py` | Eval against SV4D supervision **and** independent d-3dgs clean GT |
+| `eval_multi_metric.py` / `eval_motion_metrics.py` | LPIPS / DINOv2 / FG-IoU / motion-region IoU |
+| `eval_static_canonical.py` | Sanity: render the frozen canonical at our cameras (no motion) |
+| `measure_vgm_pollution.py` | Quantify how much of SV4D's output is hallucinated noise |
+| `build_method_animations.py` | Per-view 21-frame GIFs (vanilla vs ours, 3-col) |
+| `build_3col_gallery.py` | 3-col contact sheet + GIF (SV4D \| d-3dgs \| ours) |
+
+---
+
+## 8. Latest results table (lego_v2)
+
+| Method | PSNR vs clean GT | DOF | Notes |
+|---|---:|---:|---|
+| Vanilla SC-GS (random init) | 11.43 | 16 M | broken (Gaussian explosion) |
+| F1: vanilla warm-start (clean init, not frozen) | 11.55 | 16 M | clean init alone doesn't help |
+| F2: SC-GS DeformModel + frozen canon | 11.89 | 16 M | shows DOF isn't the bottleneck |
+| Static canonical only (no motion) | 15.91 | 0 | baseline floor |
+| Part-rigid hard ID, K=1 arm | 18.03 | 126 | "single rigid arm" |
+| LBS K=3 + ARAP | 17.98 | 378 | |
+| K=10 hier (no smart photo) | 17.14 | 1 260 | over-fragments without per-pixel signal |
+| K=10 hier + smart photo 3× | 18.56 | 1 260 | smart photo rescues K=10 (+1.42) |
+| K=100 hier + smart photo + per-time scale | 19.11 | 18 900 | |
+| **K=100 hier + smart α=16 + per-time scale + xyz residual (A1)** | **20.40** 🥇 | 885 K | **headline** |
+| Path 1: new t=0 canonical from d-3dgs + SAM | 14.07 | — | **−6.33, FAILED** — lost baseplate |
+| Path 2: mild canonical fine-tune (lr 1e-4) | 19.29 | — | **−1.11, FAILED** — drift |
+| Architecture ceiling (A1 trained on clean GT) | 20.96 | 885 K | hard upper bound |
+
+Multi-metric agreement (ours vs vanilla, 105 frames):
+
+| Metric | Vanilla | Ours | Δ |
+|---|---:|---:|---:|
+| PSNR ↑ | 11.43 | **20.40** | **+8.97** |
+| LPIPS-alex ↓ | 0.412 | **0.230** | −0.18 |
+| FG-IoU ↑ | 0.383 | **0.762** | +0.38 |
+| Motion-region IoU ↑ | 0.234 | **0.528** | +0.29 |
+| Motion magnitude correlation ↑ | 0.382 | **0.793** | +0.41 |
+
+---
+
+## 9. Repository layout
 
 ```
 EV_Final_Project/
-├── motionprior/
-│   ├── losses/cross_view_consistency.py    # CVCG module (§4)
-│   ├── integration/scgs_hook.py            # patched hook (CVCG + C3)
-│   └── ...                                  # other framework pieces
-├── scripts/
-│   ├── multiview_videos_to_dnerf.py        # mp4 → D-NeRF format
-│   ├── sam2_seg_multiview.py               # SAM-2 mask
-│   ├── characterize_vgm_artifact.py        # §3 measurement
-│   ├── build_part_*.py                     # Stages B–D
-│   ├── train_partrigid*.py                 # Stage E (3 variants)
-│   ├── eval_partrigid*.py                  # evaluators
-│   ├── render_clean_ref_*.py               # §5.5 cross-render
-│   ├── build_3col_full_gallery.py          # final visual
-│   └── ...
-├── third_party/SC-GS/                       # vendored + patched
-│   └── utils/time_utils.py:418             # LeakyReLU patch
-├── outputs/custom/                          # trained models (gitignored)
-│   ├── scene00_v5_node/                    # fits-all v5 (PSNR 31.79)
-│   ├── canonical_static_node/              # frozen canonical (PSNR 39.4)
-│   ├── partrigid_lbs_photo1/               # baseline (17.97)
-│   ├── partrigid_hier_K3_fixed/            # hier K=3 (17.98)
-│   └── lego_clean_ref/                     # clean D-NeRF ref (PSNR 25.23)
-├── runs_aux/                                # all figures + diagnostics (gitignored)
-│   ├── vgm_artifact/                       # §3 measurement
-│   ├── gallery_3col_full/                  # 3-col visual gallery
-│   ├── alignment_A{,_nobase}/              # §5.5 temporal alignment
-│   ├── clean_ref_aligned{,_nobase}/        # §5.5 spatial alignment
-│   ├── static_region_C/                    # §5.5 static-region PSNR
-│   └── part_assignment_anim/               # part-colored animation
-├── tests/
-│   ├── test_cross_view_consistency.py      # 11 tests, all pass
-│   └── test_scgs_hook.py                   # 24 tests, all pass
-└── docs/
-    ├── reports/2026-05-29_final_report.md  # full report (9 sections)
-    ├── planning/2026-05-29_final_slides.md # slide outline (20 slides)
-    ├── design/motion_design.md             # method design doc
-    └── ...
+├── motionprior/                          # CVCG + curriculum framework (Phase 1, vendored)
+├── scripts/                              # the runnable pipeline (see §7)
+├── third_party/                          # SC-GS + SAM-2 vendored (bootstrap script)
+├── data/custom/                          # datasets (gitignored)
+├── outputs/custom/                       # trained models + d-3dgs renders (gitignored)
+├── runs_aux/                             # part assignment, eval, figures (gitignored)
+├── docs/
+│   ├── reports/2026-06-01_method_survey.md         # 24-method survey
+│   ├── reports/2026-06-01_fairness_experiments.md  # F1 + F2
+│   ├── reports/2026-06-01_path1_path2_postmortem.md
+│   └── reports/2026-06-01_checkpoint2_final.md
+├── meetTW_checkpoint_0601/               # PI checkpoint (gitignored — local-only)
+└── README.md
 ```
 
 ---
 
-## Acknowledgements
+## 10. Acknowledgements
 
-- SC-GS (Sparse Controlled Gaussian Splatting) — Yi-Hua Huang et al., CVPR 2024
+- SC-GS — Yi-Hua Huang et al., CVPR 2024
+- Deformable-3DGS — Yang et al., CVPR 2024
 - SV4D 2.0 — Stability AI
 - SAM 2 — Meta AI Research
 - D-NeRF lego scene — Pumarola et al., CVPR 2021
-- Method design feedback from `Gemini Pro` (4 capacity-expansion options)
 
 ## License
 

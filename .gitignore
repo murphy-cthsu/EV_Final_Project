@@ -26,11 +26,14 @@ third_party/Wan2.2/
 third_party/generative-models/
 third_party/sam2/
 
-# Data, weights, outputs
+# Data, weights, outputs (paths may be symlinks → match w/o trailing slash)
+data
 data/
 checkpoints/
+outputs
 outputs/
 runs/
+runs_aux
 runs_aux/
 wandb/
 *.ckpt
@@ -46,3 +49,8 @@ wandb/
 # Local config
 .env
 *.local.yaml
+
+# Local-only artefacts (PI prep, data archives, agent state)
+lego.zip
+meetTW_checkpoint_0601/
+.claude/

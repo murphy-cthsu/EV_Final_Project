@@ -880,4 +880,92 @@ python scripts/eval_partrigid_on_sv4d.py --partrigid_label v1
 | Don't push CVCG to large gains | After +0.5 dB plateau, characterization showed the 4-cam setup imposes an NVS floor that no training-time method can fix. Time better spent elsewhere. |
 | Pivot to decoupled-method | User's observation that VGM is structure-noisy / motion-cleaner suggested a stronger design principle. Worth the risk. |
 | No raw RGB photometric (paper-style design) | If photometric mostly leaks structural noise into motion, removing it should help. Testable claim. |
+
+---
+
+## Appendix: Mid-experiment checkpoint (2026-05-29)
+
+> Original file: `2026-05-29_checkpoint.md`. Snapshot taken *before* the decoupled-method pivot; kept here for decision-trail completeness.
+
+### A1. What we set out to do
+
+Take a 5-view × 21-frame video output from a Video Generative Model (VGM, likely
+SV4D 2.0), supervise SC-GS 4D Gaussian reconstruction on it, and answer:
+1. Does SC-GS train at all on this data?
+2. If yes, what failure modes appear?
+3. Are those failures the VGM's fault or the training procedure's?
+4. Can a small intervention measurably improve any axis?
+
+**Honest reframing**: this is final-project-scale exploration, not a paper. We're
+producing characterization + a small methodological contribution, with honest
+limitations.
+
+### A2. Engineering finding: dying ReLU in SC-GS deform-MLP
+
+**Symptom**: vanilla SC-GS on our 5-view sparse-time data trained to PSNR ~17 dB
+with **zero learned motion** (deform-MLP output literally constant w.r.t. time).
+
+**Diagnosis**: SC-GS's deform-MLP uses ReLU activations. On our sparse temporal
+structure (21 timesteps × 5 mostly-redundant views), conflicting gradients drive
+the final hidden layer's pre-activations negative, ReLU outputs exactly zero,
+gradient stops flowing — classic dying-ReLU. We confirmed by probing the network
+state across iterations: hidden vector was `0.0000e+00` mean.
+
+**Fix**: one-line patch at `third_party/SC-GS/utils/time_utils.py:418` —
+`F.relu(h)` → `F.leaky_relu(h, negative_slope=0.01)`. The 1% leak lets dead
+neurons receive gradient and recover.
+
+**Effect**: PSNR jumped from 17.39 → 31.79 (+14.4 dB). Motion fidelity:
+render Δ matches GT Δ to ~99% per view.
+
+### A3. Artifact characterization (P0) — VGM multi-view inconsistency
+
+Used the fits-all-views v5 checkpoint as a 3D probe:
+
+| view | mean \|Δ\| (FG) | mean PSNR | rank |
+|---:|---:|---:|---:|
+| 0 | 5.81 | 24.28 | mid |
+| **1** | **8.38** | **23.25** | **worst** |
+| 2 | 6.38 | 25.59 | mid |
+| 3 | 5.57 | 25.39 | mid |
+| 4 | 4.79 | 26.74 | best |
+| all | 6.19 | 25.05 | — |
+
+Findings: per-view PSNR spread 3.5 dB; all 9 worst-residual cells from view 1; spatial residual concentrates at silhouette boundary; temporal axis relatively clean.
+
+### A4. Phase 1 ablation results (view-split + temporal-split)
+
+**View-split regime (hold out view 2):**
+
+| Run | Config | Best test PSNR | Final test | Final SSIM | Final LPIPS |
+|---|---|---:|---:|---:|---:|
+| v6 | vanilla | 13.10 | 12.68 | 0.748 | 0.243 |
+| v7 | +CVCG only | 13.36 | 13.13 | 0.748 | 0.241 |
+| v9 | +C3 only (fast) | 13.58 | 13.25 | 0.748 | 0.213 |
+| **v11** | **+C3+CVCG (fast)** | **13.61** | **13.44** | **0.760** | **0.205** |
+| v12 | +C3+CVCG (slow) | 13.30 | 13.11 | 0.746 | 0.232 |
+
+**Temporal-interpolation regime (hold every 4th frame):**
+
+| Run | Config | Best test PSNR | Final test | Degradation |
+|---|---|---:|---:|---:|
+| t_van | vanilla | 25.75 | 25.58 | −0.17 |
+| **t_slow** | **+C3+CVCG (slow)** | **27.33** | 22.47 | −4.86 |
+
+Best peak +1.58 dB with slow schedule; protective methods require early stopping in easy regime.
+
+### A5. GT-free 3D-consistency metric
+
+| Model | # Gaussians | 3D-consistent | Majority (≥4) |
+|---|---:|---:|---:|
+| v6 vanilla | 96,309 | 47.71% | 80.27% |
+| **v11 +C3+CVCG** | **43,664** | **49.43%** | **82.79%** |
+| v5 fits-all (ceiling) | 84,140 | 53.55% | 83.20% |
+
+v11: +1.72 pp more 3D-consistent, ~2× more compact representation.
+
+### A6. Open questions (at checkpoint time, pre-pivot)
+
+- Regime-dependent C3 schedule trade-off identified (fast wins hard regime, slow wins easy).
+- Pivot to decoupled structure/motion method decided after this snapshot.
 | Stop at proof-of-concept | Within time budget. Honest about what works (+2.12 dB over static) and what doesn't (vs. vanilla 26 dB). The documented fallbacks (LBS, DINO) are the principled next-step path. |

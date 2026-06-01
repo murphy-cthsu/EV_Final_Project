@@ -71,6 +71,89 @@ Each tile: `SV4D supervision GT | d-3dgs clean GT | model render`. The model col
 
 3. **Future work this enables**: with d-3dgs as a true GT signal, we can ablate which mechanism (frozen canonical / smart photo / per-time scale) matters most by comparing each variant's vs-d3dgs PSNR.
 
+---
+
+## Attribution analysis (Q2: is the win from the canonical or the motion?)
+
+> Added 2026-05-31 PM. Motivation: all prior lego_v2 runs co-vary K=100 + smart
+> photo + scale + residuals, so no single factor was ever isolated. Two
+> no-training measurements settle the dominant question.
+
+### Attribution ladder (vs d-3dgs clean GT)
+
+| Configuration | vs clean GT | increment | share of total gain |
+|---|---:|---:|---:|
+| Vanilla SC-GS (joint train, raw photo) | 11.43 | — | — |
+| **Frozen canonical, ZERO motion** (`eval_static_canonical.py`) | **18.67** | **+7.24** | **82%** |
+| + part-rigid motion (K=100 smart+scale) | 19.84 | +1.17 | 13% |
+| + per-Gaussian xyz residual | 20.28 | +0.44 | 5% |
+
+**82% of the +8.85 dB headline gain comes from simply having a clean frozen
+canonical, before any motion is learned.** The part-rigid motion machinery
+contributes +1.17 dB; xyz residual +0.44 dB.
+
+Per-timestep, the static canonical ranges only **17.47 (t3, extreme) → 20.77
+(t12, reference pose)** — a **3.3 dB** spread. At the reference pose the static
+canonical (20.77) *beats* the full Phase 2 mean (20.28). Implication: **the lego
+digger barely moves relative to its size; motion headroom on this scene is only
+~3 dB.** lego is a weak testbed for the motion contribution — a large-articulation
+scene (jumpingjacks) is needed to demonstrate the motion method.
+
+### VGM noise: appearance vs geometry (`measure_vgm_pollution.py`)
+
+SV4D supervision frames vs d-3dgs clean GT at the same (cam, t), texture-independent
+silhouette IoU vs in-mask PSNR. v0 (clean input) is the control for the baseplate/
+scale offset (SAM-2 removes the baseplate, d-3dgs keeps it):
+
+| view | role | silh IoU | in-mask PSNR | full PSNR |
+|---|---|---:|---:|---:|
+| 0 | input (clean) | 0.483 | 26.82 | 14.89 |
+| 1 | generated | 0.265 | 12.33 | 14.65 |
+| 2 | generated | 0.408 | 10.06 | 14.10 |
+| 3 | generated | 0.513 | 11.64 | 14.79 |
+| 4 | generated | 0.432 | 12.97 | 13.69 |
+| — | v1-4 mean | 0.404 | 11.75 | 14.31 |
+
+- **Geometry (IoU)**: generated views drop only ~0.08 below the v0 control on
+  average (v1 worst at −0.22; v3 actually above v0). Geometry is **mildly,
+  view-dependently degraded — not severely polluted.**
+- **Appearance (in-mask PSNR)**: collapses 26.8 → 11.8 (−15 dB) on generated
+  views. (Caveat: in-mask PSNR still conflates residual pose error with texture.)
+
+Together with the static-canonical result, this says: **VGM's structure is mostly
+fine; the method wins by not using VGM's structure (or appearance) at all, sourcing
+both from the clean canonical.** This sharpens the Q3 question — since the canonical
+does ~82% of the work, the single-frame-lifted-canonical ablation (no clean-GT
+canonical) is now the make-or-break experiment for real-VGM-scenario validity.
+
+### Full attribution ladder (completed)
+
+| Configuration | vs clean GT | increment | share of +8.85 total |
+|---|---:|---:|---:|
+| Vanilla SC-GS (joint train) | 11.43 | — | — |
+| Frozen canonical, ZERO motion | 18.67 | +7.24 | **82%** |
+| + single rigid body (K=1, smart+scale) | 19.66 | +0.99 | 11% |
+| + 99 articulated sub-parts (K=1 → K=100) | 19.84 | **+0.18** | **2%** |
+| + per-Gaussian xyz residual | 20.28 | +0.44 | 5% |
+
+Cross-cut: K=100 with smart photo OFF (`--lam_photo_smart 0`) = **19.48** →
+smart photometric contributes **+0.36 dB**.
+
+**Decisive finding**: the hierarchical part-rigid articulation (K sub-parts +
+LBS) — the supposed methodological core — contributes only **+0.18 dB** on lego.
+A single rigid body (K=1) already reaches 19.66; the 99 extra parts add almost
+nothing. Reason: the lego digger's motion is a near-rigid arm sweep, and the arm
+Gaussians (28,057) were already isolated, so K=1 vs K=100 barely differ. Every
+high-effort design knob (articulation +0.18, smart photo +0.36, xyz residual
++0.44) lands at noise level.
+
+**Implication for the story**: lego strongly validates **decoupling** (frozen
+canonical = +7.24 dB, invisible under VGM-self eval) but **cannot validate
+articulation**. To support the part-rigid claim, a large-articulation scene
+(jumpingjacks) must re-run this ladder — only there can K=100 vs K=1 separate.
+
+Runs: `partrigid_lego_v2_K1_smart_scale` (19.66), `partrigid_lego_v2_K100_nophoto_scale` (19.48).
+
 ## Reproduce
 
 ```bash
