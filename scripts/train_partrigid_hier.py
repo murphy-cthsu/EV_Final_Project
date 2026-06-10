@@ -200,6 +200,10 @@ def main():
                    default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
                    help="Per-(view, time) renders from the fits-all v5 canonical (§3) "
                         "OR the d-3dgs clean reference for lego_v2")
+    p.add_argument("--motion_gated_smart_photo", action="store_true",
+                   help="When set, smart-photo weight applies only on static pixels "
+                        "(motion mask == 0). Moving pixels get weight = 1. Useful when "
+                        "reference is a static canonical render (Option B leak-free).")
     p.add_argument("--canon_ply",  default=None, help="Override canonical ply path")
     p.add_argument("--part_dir",   default=None, help="Override part assignment dir")
     p.add_argument("--scene_dir",  default=None, help="Override scene dir (with transforms_train.json)")
@@ -420,11 +424,48 @@ def main():
     background = torch.tensor([1, 1, 1], dtype=torch.float32, device=args.device)
 
     # ===== Pre-compute smart-photometric filter weights from v5 fits-all canonical =====
+    # When --motion_gated_smart_photo is set: weight only applies to static pixels
+    # (m_v == 0). On moving pixels weight = 1 (no filter), so motion learns from
+    # raw photo signal without being suppressed by a static reference.
     smart_photo_weights = None
     if args.lam_photo_smart > 0:
         v5_dir = REPO_ROOT / args.v5_render_dir
         if not v5_dir.exists():
             raise FileNotFoundError(f"v5 render dir missing: {v5_dir}")
+        # Optional per-view static motion mask (precomputed by motion_parts_generic.py)
+        per_view_motion = {}
+        if args.motion_gated_smart_photo:
+            # Recompute per-view static motion mask = pixels that move at any t.
+            # Use SAME logic as motion_parts_generic: temporal std + Otsu inside FG.
+            from skimage.filters import threshold_otsu
+            view_set = sorted({int(f["view_idx"]) for f in data["frames"]})
+            for v in view_set:
+                frames_v = [None] * T
+                for f in data["frames"]:
+                    if int(f["view_idx"]) != v: continue
+                    ti = int(f["frame_idx"])
+                    flat_idx = v * T + ti
+                    candidate = SCENE / "train" / f"r_{flat_idx:05d}.png"
+                    if not candidate.exists():
+                        candidate = SCENE / "test" / f"r_{flat_idx:05d}.png"
+                    rgba = np.asarray(iio.imread(candidate), dtype=np.float32) / 255.0
+                    a = rgba[..., 3:4] if rgba.shape[-1] == 4 else np.ones_like(rgba[..., :1])
+                    rgb = rgba[..., :3] * a + 1.0 * (1 - a)
+                    frames_v[ti] = (rgb, a[..., 0])
+                # Stack
+                stk = np.stack([fr[0] for fr in frames_v if fr is not None], axis=0)
+                alp = np.stack([fr[1] for fr in frames_v if fr is not None], axis=0)
+                std = stk.std(axis=0).mean(axis=-1)  # (H, W)
+                fg_any = alp.max(axis=0) > 0.5
+                vals = std[fg_any]
+                thresh = float(threshold_otsu(vals)) if vals.size > 0 else 0.05
+                moving = (std > thresh) & fg_any
+                frac = moving.sum() / max(fg_any.sum(), 1)
+                if frac > 0.7 or frac < 0.05:  # safety clamp
+                    thresh = float(np.percentile(vals, 70)) if vals.size > 0 else 0.05
+                    moving = (std > thresh) & fg_any
+                per_view_motion[v] = moving.astype(np.float32)
+                print(f"  [motion-gated] view {v}: moving_frac={moving.sum()/max(fg_any.sum(),1):.3f}")
         smart_photo_weights = []
         for i, f in enumerate(data["frames"]):
             v = int(f["view_idx"]); ti = int(f["frame_idx"])
@@ -438,11 +479,14 @@ def main():
             gt_rgb_np = gt_rgbs[i].permute(1, 2, 0).cpu().numpy()
             residual = np.abs(gt_rgb_np - v5_rgb).mean(axis=-1)  # (H, W)
             weight = np.exp(-args.photo_smart_alpha * residual)
+            if args.motion_gated_smart_photo and v in per_view_motion:
+                weight = np.where(per_view_motion[v] > 0.5, 1.0, weight).astype(np.float32)
             smart_photo_weights.append(torch.from_numpy(weight.astype(np.float32)).to(args.device))
         # Diagnostics
         avg_weight = float(torch.stack(smart_photo_weights).mean())
         print(f"[hier] smart photo: pre-built {len(smart_photo_weights)} weight maps  "
-              f"(mean weight={avg_weight:.3f}, low = filtered-as-artifact)")
+              f"(mean weight={avg_weight:.3f}, low = filtered-as-artifact; "
+              f"motion-gated={args.motion_gated_smart_photo})")
 
     print(f"[hier] training {args.iterations} iters with {len(cams)} cameras")
     t0 = time.time()
