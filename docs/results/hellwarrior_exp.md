@@ -71,6 +71,29 @@ photo+silh+ARAP 就能找到動作)。
 **敘事升級:hellwarrior 重建差不再是 limitation,而是量測結果** ——
 「凍結式管線把 VGM 的 articulated 失敗模式轉成 9.2 dB 的可量化傷害」。
 
+### Perceptual metric 全表(PSNR/SSIM/LPIPS,雙 GT)— 2026-06-13 補
+
+> 1197 frames(全 57 視角)、LPIPS=AlexNet(低=好)。
+> 腳本:`scripts/eval_metrics_table.py` → `runs_aux/metrics_table_hellwarrior/`。
+
+| model | PSNR vs clean | SSIM vs clean | LPIPS vs clean | PSNR vs SV4D | LPIPS vs SV4D | overfit gap (dB) |
+|---|---:|---:|---:|---:|---:|---:|
+| ours(SV4D 監督) | 13.51 | 0.824 | 0.240 | 15.31 | 0.217 | −1.80 |
+| oracle(乾淨監督,同結構) | 22.75 | 0.938 | **0.091** | 12.95 | 0.230 | +9.79 |
+
+**讀法 —— oracle gap 不依賴 PSNR,三個 metric 同向:**
+
+| oracle gap 的版本 | lego(rigid) | hellwarrior(articulated) |
+|---|---:|---:|
+| PSNR(oracle − ours) | 0.4–0.6 dB | **9.2 dB** |
+| LPIPS(ours ÷ oracle) | 0.92×(無損傷,ours 略佳) | **2.6×** |
+| SSIM(oracle − ours) | ~0.00 | **0.114** |
+
+- LPIPS 0.091 同時證明 oracle 的 22.7 dB 不是模糊高分 —— 乾淨監督下知覺品質
+  真的好(對照 lego ours 0.146)。
+- overfit gap:lego ours +5.95(去噪)vs hellwarrior ours −1.80(fit 噪音)——
+  變號結論在 perceptual 協議下成立。
+
 ### Oracle gap 的可視化(novel pose 軌道,poster 候選圖)
 
 相機沿 elev-0 ring 在 grid 之外的方位角 slerp(novel pose)、動作同步播放;
