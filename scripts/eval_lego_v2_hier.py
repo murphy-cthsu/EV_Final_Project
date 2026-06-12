@@ -51,6 +51,7 @@ def main():
     p.add_argument("--canon_ply", default=None,
                    help="canonical ply path (auto-detect from state config if omitted)")
     p.add_argument("--save_renders", action="store_true")
+    p.add_argument("--d_rot_zero", action="store_true")
     args = p.parse_args()
 
     s = np.load(REPO / f"outputs/custom/partrigid_{args.label}/partrigid_state.npz", allow_pickle=True)
@@ -129,7 +130,9 @@ def main():
         if have_xyz_res and arm_idx_res is not None and len(arm_idx_res) > 0:
             new_xyz[arm_idx_res] = new_xyz[arm_idx_res] + xyz_res_kt[:, tl, :]
         d_xyz_t = torch.from_numpy((new_xyz - xyz_canon).astype(np.float32)).cuda()
-        d_rot = torch.zeros(N, 4, device="cuda") - torch.tensor([1, 0, 0, 0], device="cuda")
+        d_rot = torch.zeros(N, 4, device="cuda")
+        if not args.d_rot_zero:
+            d_rot = d_rot - torch.tensor([1, 0, 0, 0], device="cuda")
         d_sc = torch.zeros(N, 3, device="cuda")
         if have_scale:
             scale_blend = lbs @ scale_per_kt[:, tl, :]

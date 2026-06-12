@@ -179,6 +179,13 @@ def main():
                         "the SAM mask (e.g., baseplate not in mask) to avoid silhouette "
                         "fighting canonical. GENERIC, not lego-specific.")
     p.add_argument("--lam_traj", type=float, default=0.1)
+    p.add_argument("--arap_cross_part", type=float, default=1.0,
+                   help="ARAP weight multiplier for cluster pairs in DIFFERENT motion "
+                        "parts (joints). 1.0 = legacy uniform; e.g. 0.1 lets joints "
+                        "articulate while limbs stay rigid. Needs multi-part part_dir.")
+    p.add_argument("--zero_traj_init", action="store_true",
+                   help="L1b diagnostic: init per-cluster translations to zero instead "
+                        "of the Stage D centroid trajectory (fully removes Stage D).")
     p.add_argument("--lam_smooth", type=float, default=1.0)
     p.add_argument("--lam_arap", type=float, default=0.5,
                    help="ARAP-like inter-cluster smoothness (penalises adjacent sub-parts disagreeing)")
@@ -200,6 +207,8 @@ def main():
                    default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
                    help="Per-(view, time) renders from the fits-all v5 canonical (§3) "
                         "OR the d-3dgs clean reference for lego_v2")
+    p.add_argument("--d_rot_zero", action="store_true",
+                   help="Correct identity rotation residual (d_rot=0). Legacy default subtracts (1,0,0,0) from raw quats, scrambling orientations.")
     p.add_argument("--motion_gated_smart_photo", action="store_true",
                    help="When set, smart-photo weight applies only on static pixels "
                         "(motion mask == 0). Moving pixels get weight = 1. Useful when "
@@ -287,9 +296,15 @@ def main():
 
     # ===== LBS weights (global arm vs body) + 3D trajectory =====
     arm_weights_global = np.load(PART_DIR / "gaussian_arm_weights.npy")
-    centroid_3d = np.load(PART_DIR / "part_centroid_3d.npy")  # (T, 2, 3)
+    centroid_3d = np.load(PART_DIR / "part_centroid_3d.npy")  # (T, P+1, 3); last entry = body
     conf = np.load(PART_DIR / "part_centroid_confidence.npy")
     T = centroid_3d.shape[0]
+    n_motion_parts = centroid_3d.shape[1] - 1
+    gauss_part_np = None
+    if n_motion_parts > 1:
+        gauss_part_np = np.load(PART_DIR / "gaussian_motion_part.npy")  # (N,) in {-1, 0..P-1}
+        print(f"[hier] multi-part Stage D: {n_motion_parts} motion parts "
+              f"(labelled Gaussians: {(gauss_part_np >= 0).sum()})")
     print(f"[hier] N={N}, T={T}, mean global arm_weight={arm_weights_global.mean():.3f}")
 
     # ===== K-means cluster the arm Gaussians =====
@@ -324,10 +339,44 @@ def main():
     print(f"[hier] LBS weights stats: mean sum per Gaussian = {lbs_weights.sum(1).mean():.3f} "
           f"(body ~0, arm ~1)")
 
-    # ===== Init translation from full-arm centroid trajectory =====
+    # ===== Init translation from centroid trajectory (per part if multi-part) =====
     centroid_3d_t = torch.tensor(centroid_3d, dtype=torch.float32, device=args.device)
-    arm_trans_global = centroid_3d_t[:, 0] - centroid_3d_t[0, 0]  # (T, 3) for the WHOLE arm
-    sub_trans_init = arm_trans_global.unsqueeze(0).expand(args.k_arm, T, 3).contiguous()  # (K, T, 3)
+    part_of_cluster = None
+    if n_motion_parts > 1:
+        # Majority-vote a motion part per k-means cluster (used for per-part
+        # trajectory init and for part-aware ARAP).
+        arm_part_labels = gauss_part_np[arm_mask_np]  # aligned with kmeans `labels`
+        part_of_cluster = np.zeros(args.k_arm, dtype=np.int64)
+        for k in range(args.k_arm):
+            member = arm_part_labels[labels == k]
+            member = member[member >= 0]
+            if member.size > 0:
+                part_of_cluster[k] = np.bincount(member, minlength=n_motion_parts).argmax()
+            else:
+                d0 = np.linalg.norm(centroid_3d[0, :n_motion_parts] - centers[k], axis=1)
+                part_of_cluster[k] = int(d0.argmin())
+        counts = np.bincount(part_of_cluster, minlength=n_motion_parts)
+        print(f"[hier] clusters per motion part: {counts.tolist()}")
+    if args.zero_traj_init:
+        sub_trans_init = torch.zeros(args.k_arm, T, 3, device=args.device)
+        print("[hier] zero_traj_init: Stage D trajectory NOT used for init")
+    elif n_motion_parts > 1:
+        sub_trans_init = torch.stack([
+            centroid_3d_t[:, int(p)] - centroid_3d_t[0, int(p)] for p in part_of_cluster
+        ])  # (K, T, 3)
+    else:
+        arm_trans_global = centroid_3d_t[:, 0] - centroid_3d_t[0, 0]  # (T, 3) for the WHOLE arm
+        sub_trans_init = arm_trans_global.unsqueeze(0).expand(args.k_arm, T, 3).contiguous()  # (K, T, 3)
+
+    # Pre-compute fixed per-part trajectory-loss weights (multi-part Stage D)
+    traj_part_w = None
+    if n_motion_parts > 1:
+        gauss_part_t = torch.from_numpy(gauss_part_np).long().to(args.device)
+        w_base = lbs_weights.sum(1)
+        traj_part_w = []
+        for p_i in range(n_motion_parts):
+            w_p = w_base * (gauss_part_t == p_i).float()
+            traj_part_w.append((w_p, float(w_p.sum().item())))
 
     # Index arm Gaussians (lbs sum > 1e-4) for per-Gaussian XYZ residual
     nontrivial_mask_np = (lbs_weights.sum(1) > 1e-4).cpu().numpy()
@@ -496,6 +545,19 @@ def main():
     cluster_dist = torch.cdist(arm_centers_t, arm_centers_t)  # (K, K)
     n_neigh = min(3, args.k_arm)
     cluster_neigh = cluster_dist.topk(n_neigh, dim=1, largest=False).indices  # (K, n_neigh)
+    # Part-aware ARAP: full strength within a motion part, down-weighted across
+    # part boundaries (joints) so limbs stay rigid but joints can articulate.
+    arap_pair_w = torch.ones(args.k_arm, cluster_neigh.shape[1], device=args.device)
+    if args.arap_cross_part != 1.0 and part_of_cluster is not None:
+        poc = torch.from_numpy(part_of_cluster).to(args.device)
+        for k_neigh in range(1, cluster_neigh.shape[1]):
+            same = poc == poc[cluster_neigh[:, k_neigh]]
+            arap_pair_w[:, k_neigh] = torch.where(
+                same, torch.ones_like(arap_pair_w[:, 0]),
+                torch.full_like(arap_pair_w[:, 0], args.arap_cross_part))
+        n_cross = int((arap_pair_w[:, 1:] < 1).sum().item())
+        print(f"[hier] part-aware ARAP: {n_cross}/{args.k_arm * (cluster_neigh.shape[1]-1)} "
+              f"cross-part pairs down-weighted to {args.arap_cross_part}")
 
     for it in range(1, args.iterations + 1):
         idx = np.random.randint(len(cams))
@@ -520,7 +582,8 @@ def main():
             d_xyz_clone[arm_idx_tensor] = d_xyz_clone[arm_idx_tensor] + model.xyz_residual[:, t, :]
             d_xyz = d_xyz_clone
         d_rotation = torch.zeros(N, 4, device=args.device)
-        d_rotation = d_rotation - torch.tensor([1, 0, 0, 0], device=args.device)
+        if not args.d_rot_zero:
+            d_rotation = d_rotation - torch.tensor([1, 0, 0, 0], device=args.device)
         d_scaling = torch.zeros(N, 3, device=args.device)
         # Per-(cluster, time) scale residual via LBS-weighted blend
         if args.use_per_time_scale:
@@ -565,11 +628,20 @@ def main():
         gt_alpha = gt_alphas[idx]
         L_silh = silhouette_loss(alpha[0], gt_alpha, outside_weight=args.silh_outside_weight)
 
-        # Trajectory loss: union of all clusters' centroid should track target
-        target = centroid_3d_t[t, 0]
-        cc = conf[t, 0]
-        pred = (lbs_weights.sum(1).unsqueeze(1) * new_xyz).sum(0) / lbs_weights.sum(1).sum().clamp(min=1e-6)
-        L_traj = float(cc) * ((pred - target) ** 2).sum()
+        # Trajectory loss: cluster-union centroid tracks Stage D target
+        # (per motion part when multi-part Stage D is available)
+        if n_motion_parts > 1:
+            L_traj = torch.tensor(0.0, device=args.device)
+            for p_i, (w_p, denom) in enumerate(traj_part_w):
+                if denom < 1e-6:
+                    continue
+                pred = (w_p.unsqueeze(1) * new_xyz).sum(0) / denom
+                L_traj = L_traj + float(conf[t, p_i]) * ((pred - centroid_3d_t[t, p_i]) ** 2).sum()
+        else:
+            target = centroid_3d_t[t, 0]
+            cc = conf[t, 0]
+            pred = (lbs_weights.sum(1).unsqueeze(1) * new_xyz).sum(0) / lbs_weights.sum(1).sum().clamp(min=1e-6)
+            L_traj = float(cc) * ((pred - target) ** 2).sum()
 
         # Temporal smoothness (per cluster)
         L_smooth = ((model.trans[:, 1:, :] - model.trans[:, :-1, :]) ** 2).mean() + \
@@ -593,11 +665,13 @@ def main():
             L_rot_res_l2 = (model.rot_residual ** 2).mean()
 
         # ARAP-like: adjacent clusters should not differ too much
+        # (pair weights down-weight cross-part joints when --arap_cross_part < 1)
         L_arap = 0.0
         for k_neigh in range(1, cluster_neigh.shape[1]):
             nbrs = cluster_neigh[:, k_neigh]  # (K,) indices
-            L_arap = L_arap + ((model.trans - model.trans[nbrs]) ** 2).mean()
-            L_arap = L_arap + ((model.aa - model.aa[nbrs]) ** 2).mean()
+            w_pair = arap_pair_w[:, k_neigh].view(-1, 1, 1)
+            L_arap = L_arap + (w_pair * (model.trans - model.trans[nbrs]) ** 2).mean()
+            L_arap = L_arap + (w_pair * (model.aa - model.aa[nbrs]) ** 2).mean()
         L_arap = L_arap / max(cluster_neigh.shape[1] - 1, 1)
 
         # Optional blurred photometric
