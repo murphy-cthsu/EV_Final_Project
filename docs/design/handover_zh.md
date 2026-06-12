@@ -45,7 +45,7 @@
 **Smart-photometric loss**(VGM 監督的關鍵技巧):per-pixel 信心權重
 `w = exp(-α·|I_sv4d − I_ref|)`,再 `L = Σ|I_pred − I_sv4d|·w·alpha_mask / Σw`。
 - SV4D 跟乾淨參考不一致的像素 → 權重 ~0(濾掉 hallucination)。α=16。
-- **重要(leakage 歷史):** 原本 `I_ref` 用 d-3dgs render = eval GT → soft leakage。**已修**成 **motion-gated canonical-static render**(Stage A' = 把凍結 canonical 渲到每個視角;靜止區跟它比,動態區權重=1)。Leak-free headline = **20.03 dB**(原 leaky 20.40)。一律報 leak-free。
+- **重要(leakage 歷史):** 原本 `I_ref` 用 d-3dgs render = eval GT → soft leakage。**已修**成 **motion-gated canonical-static render**(Stage A' = 把凍結 canonical 渲到每個視角;靜止區跟它比,動態區權重=1)。Leak-free headline = **20.35 dB**(rotfix 後;rotfix 前 20.03,原 leaky 20.40)。一律報 leak-free+rotfix,訓練/評估記得帶 `--d_rot_zero`。
 
 **關鍵設計理由(放 poster):**
 - 凍結 vs joint:vanilla joint SC-GS = 11.43 dB(幾何爆炸);我們凍結 = 20.03。
@@ -60,7 +60,7 @@
 ### 3a. 描述性診斷(D-series)— SV4D vs 乾淨 d-3dgs
 - **D5 空間保真度 vs 視角** → **「可靠錐」**:PSNR(SV4D, clean) 在 input azimuth = 37.5 dB → 遠側 ~19 dB(18 dB 落差);每 10° elevation −0.77 dB。
 - **D3 時間 flicker** → 37.5% 應靜止的像素在 SV4D 裡假性「在動」;input view 5.7% → 偏軸高達 57%。同一個方位錐結構。
-- **D6 pose drift** → 生成物體 centroid 偏離要求幾何 +0.57 px/°(對應 SV4D 2.0 論文自己寫的 failure mode)。
+- **D6 pose drift（v2,對齊參考重算）** → 生成內容偏位:lego 11→28 px、hellwarrior 36→53 px(對齊 d-3dgs 參考的運動區質心;azimuth 為主軸,含 timing 混合成分);呼應 SV4D 2.0 論文自承的 pose-misalignment failure。
 - **D2/D7 定位** → hallucination 在輪廓邊緣強 1.4×;誤差 81%「外觀錯」、19%「無中生有」、0%「漏掉」。
 - **Generality** → cone 在 hellwarrior(articulated)也複製 —— rigid 場景空間崩、articulated 場景時間 flicker 主導(9.2×)。
 
@@ -137,7 +137,7 @@ CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=6 python scripts/fit_residual_probe.py \
 |---|---:|---:|
 | Vanilla SC-GS(joint,16M deform-MLP) | 11.43 | 16M |
 | SC-GS deform-MLP + 我們的凍結 canonical（F2） | 11.89 | 16M |
-| **我們（凍結 canon + part-rigid,leak-free）** | **20.03** | 885K |
+| **我們（凍結 canon + part-rigid,leak-free + rotfix）** | **20.35** | 885K |
 | Oracle 天花板（我們訓在乾淨 GT 上） | 20.96 | 885K |
 | 我們，僅 digger 區（排除底板） | 21.12 | — |
 
@@ -170,6 +170,14 @@ CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=6 python scripts/fit_residual_probe.py \
 - 單一 generator(SV4D 2.0);cross-generator 是 future work(`meetTW_checkpoint_0601/benchmark_plan.md`)。
 
 ---
+
+## 7.5 P1 生成實驗成果（2026-06-11 凌晨,自主 session）
+
+- **fp16 突破**:`SV4D_HALF_UNET=1` 讓 sv4d2(5-view)在本機 20GB 生成成功(8-view 模型與 SV4D 1.0 仍 OOM/不可行)。品質與上游同量級(對 d-3dgs L1: 0.044-0.049 vs 0.039-0.053)。
+- **自主生成管線**:`scripts/render_input_video_dnerf_scgs.py`(從訓好模型渲輸入影片)→ SV4D 生成(一 ring ~8min)→ `scripts/diagnose_sed_selfgen.py`(GT-free SED)。完整指令見 `meetTW_checkpoint_0601/p1_generation_session.md`。
+- **新資料**:`/mnt/HDD_1/cthsu/sv4d_p1_out/` — lego 4 rings + jumpingjacks/standup 各 3 rings(全新場景,自產)。
+- **SED 多場景**(同協議,~floor 0.16px):jumpingjacks 0.32 / lego 0.34 / standup 0.48 → 幾何不一致跨場景存在、量級內容依賴。
+- Generality:2 場景 → **4 場景**;且證明診斷管線可對自產資料 end-to-end 運作。
 
 ## 8. 3 天、2 人計畫（poster scope）
 
