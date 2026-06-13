@@ -53,6 +53,27 @@
 | G | Stage D 軌跡 init(DLT) | 質心三角化當 SE(3) 平移 init | 可選(hellwarrior/lego 拔掉無損,見各 exp) |
 | — | ~~Per-Gaussian rot residual~~ | 試過每高斯旋轉殘差 | **+0.04 → 拒絕**(誠實負結果) |
 
+### Component B 長怎樣(Stage B motion mask + Stage C part 投票)
+
+**怎麼算**:Stage B = 每視角逐像素**時間標準差**(across 21 幀)+ Otsu 門檻(前景內)
++ 形態學清理 → 「在動」的像素。Stage C = 把 canonical 高斯投影到各視角,用 motion mask
+**多視角投票** → 每顆高斯 arm / body。**純啟發式、零學習、無光流。**
+
+lego(單一動件,乾淨):紅 = motion mask / arm 高斯,集中在鏟斗臂;車身履帶底板 = body:
+
+![](../../runs_aux/stageBC_lego_v2.png)
+
+jumpingjacks(全身動,粗糙):紅區大且溢出輪廓 —— mask 明顯粗:
+
+![](../../runs_aux/stageBC_jumpingjacks.png)
+
+**這真的有用嗎?(誠實)** mask 很粗,但**精度不重要** —— hellwarrior 的 allmove 實驗
+(gate 全開、等於不要 mask)= 13.38 vs 用 mask 13.51,幾乎一樣。mask 的**真正功能**
+不是精確分割,而是當 **smart-photo 的開關**:smart-photo 拿靜態 canonical 當參考,
+若對動的像素也濾波,動區永遠跟靜態 canonical 不一致 → 權重→0 → **動作學不到**;
+mask 只需粗略二元「這塊動不動」來決定動區關掉濾波。→ **B 是讓 D(smart-photo)能用的
+輔助件,不是 +dB 主力**(主力是 A 凍結 canonical + D smart-photo)。
+
 累積階梯(左)+ 各機制單獨貢獻(右,含被拒絕的 rot-residual):
 
 ![](../../runs_aux/component_ablation.png)
