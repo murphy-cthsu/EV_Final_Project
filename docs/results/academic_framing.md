@@ -35,10 +35,16 @@
 ## 2. Contribution claims(按可辯護性排序,附證據)
 
 **C1 ★ 方法論(最novel):Reconstruction-as-measurement。**
-凍結結構 → 不一致無處可藏 → 殘差即不一致。實作成 GT-free fit-residual probe,
-**驗證它重現 reference-based cone**(lego ρ=0.82、hellwarrior ρ=0.87),並與獨立的
-幾何儀器(SED)、分佈儀器(FV4D)、supervision-damage(oracle gap)互相印證。
+凍結結構 → 不一致無處可藏 → 殘差即不一致。實作成 fit-residual probe,
+其 per-view 殘差與 reference 不一致量相關(lego ρ=0.82、hellwarrior ρ=0.87),
+**per-pixel 可定位**(其他儀器做不到),並與幾何(SED)、分佈(FV4D)、
+supervision-damage(oracle gap)互相印證。
 > 關鍵論點:「freeze 讓重建變差」與「freeze 讓量測變準」是**同一個性質**。
+> ⚠️ **誠實邊界(standup 實驗,2026-06-14)**:那個 ρ 是 **vs 乾淨參考(araw)**
+> 的相關,**不是** standalone GT-free。純 R_vgm vs 方位距離在無參考場景(standup)
+> 反向(ρ=−0.82,被 fit 難度汙染)。所以 probe 是**參考校準型**儀器(價值在
+> per-pixel 定位,需參考驗證),**不是**「無參考可部署」。免參考的是 SED。
+> 這個邊界本身要寫進論文 —— 知道邊界比誇大覆蓋更可信。
 
 **C2 經驗發現:SV4D 2.0 的失效結構。**
 (a) 空間可靠錐(input 37.5 → 偏軸 19.4 dB,−0.77 dB/10° elev);

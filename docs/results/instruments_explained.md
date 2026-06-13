@@ -35,8 +35,19 @@
   拟合能吸收**中等**錯位(hellwarrior IoU 0.28 可用),但不能吸收完全錯的相機帧
   (jumpingjacks IoU 0.19 失敗 = 復用了錯坐標系的相機)。
 - **量到**:空間 + 時間 flicker + 外觀,全折進 photometric 殘差(比純幾何寬)。
-  **per-pixel 可定位、可歸因**。GT-free 重現 cone:lego ρ=0.82、hellwarrior ρ=0.87。
-  capacity floor 對照:乾淨擬合殘差小 3.6–4.8×、平坦 7–9% → per-view 變化是不一致非容量。
+  **per-pixel 可定位、可歸因**。
+- **⚠️ 重大修正(2026-06-14,standup 實驗揭露)**:headline ρ=0.82/0.87 是
+  **R_vgm vs araw(=|SV4D − 乾淨 d-3dgs|,需要乾淨參考)** 的相關 —— **不是**
+  「純 GT-free 信號自己就重現 cone」。核對:R_vgm vs 方位距離的 spearman 在三場景
+  分別是 lego −0.18、hellwarrior +0.40、**standup −0.82(反向!)** —— 單獨 R_vgm
+  **不能** standalone 重現可靠錐。原因:沒有 capacity floor 減掉「fit 難度基線」時,
+  R_vgm 量的是「目標多銳利」(input 視角的原始輸入最銳利、最難 fit → 殘差最高)
+  而非「多不一致」。
+- **真實適用邊界**:probe 是**參考校準型**儀器 —— 它的 per-view 信號只有在
+  **有乾淨參考做 floor/驗證**時才可信。真正無參考時(standup)原始殘差被汙染、
+  給出錯誤 cone。所以「GT-free」應理解為「不需逐幀乾淨 4D video,但需要乾淨參考
+  來校準/驗證」,**不是**「無參考也能部署」。SED 才是真正免參考的那個。
+- **probe 真正不可替代的價值**:**per-pixel 定位**(SED 做不到),前提是有參考校準。
 - **弱點**:殘差混因(需 floor 對照);需 canonical + 相機。
 
 ## 3. Reference cone(D-series):需要最多,當驗證基準
