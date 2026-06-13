@@ -260,6 +260,14 @@ swap)→ 投影(z-buffer 遮擋)當 SAM-2 point prompts,SAM 只修邊界:
 - generality:rigid → 空間崩、articulated → 時間 flicker 主導(9.2×)。
 - 本頁 §3 的 oracle gap + overfit-gap 變號是診斷的第四、第五個獨立訊號。
 
+GAP-2(R_clean 平坦 → cone 屬於 SV4D 不是參考,hellwarrior 在右):
+
+![](../../runs_aux/gap2_reference_floor.png)
+
+獨立儀器(SED 幾何 + FVD/FV4D 分佈,hellwarrior 全項比 lego 差):
+
+![](../../runs_aux/instruments_sed_fv4d.png)
+
 ---
 
 ## 6. Poster 怎麼引用(建議措辭)
