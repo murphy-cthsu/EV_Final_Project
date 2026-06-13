@@ -82,6 +82,12 @@ vanilla vs 自己的 SV4D 監督(held-out 時刻;證明身體輪廓在、非全�
 
 ![](../../runs_aux/hellwarrior_vanilla_compare/vanilla_fits_sv4d_heldout.png)
 
+動態 ours vs vanilla(SV4D | vanilla | ours)+ novel view(相機在 grid 方位之間插值):
+
+![](../../runs_aux/scene_videos/hellwarrior_compare_v0.gif)
+
+![](../../runs_aux/scene_videos/hellwarrior_novel.gif)
+
 **讀法(誠實,且強化中心論點):**
 - **方法優勢隨監督噪音增大而縮小**:rigid+欠約束(lego_v2)method 差 +8.9 dB;
   articulated+多視角(hellwarrior)只差 +0.83 dB。

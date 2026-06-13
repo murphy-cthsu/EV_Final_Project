@@ -53,6 +53,12 @@ jumpingjacks(9 視角、乾淨監督)vanilla 只 +2.65 沒爆,打破純視角數
 `spike_artifact_explanation.md` 量到的「暗針沿視線、各向異性 p95=1727」的視覺顯影,
 比 hellwarrior 更戲劇,**poster 黑尖刺機制圖首選**。ours 凍結結構保住身體。)
 
+動態 ours vs vanilla(SV4D | vanilla 黑針爆炸 | ours)+ novel view:
+
+![](../../runs_aux/scene_videos/standup_selfgen_compare_v0.gif)
+
+![](../../runs_aux/scene_videos/standup_selfgen_novel.gif)
+
 ---
 
 ## 3. ★ GT-free probe 的誠實修正(本場景最重要產出)

@@ -110,6 +110,12 @@ F2 的價值是展示「凍結 + 無結構動作」的失敗型態。
 |---|---|
 | ![](../../meetTW_checkpoint_0601/figs/vanilla_v0_t10.png) | ![](../../meetTW_checkpoint_0601/figs/ours_v0_t10.png) |
 
+動態 ours vs vanilla(SV4D | vanilla 黑尖刺爆炸 | ours;21 幀)+ novel view orbit:
+
+![](../../runs_aux/scene_videos/lego_v2_compare_v0.gif)
+
+![](../../runs_aux/scene_videos/lego_v2_novel.gif)
+
 ---
 
 ## 2.5 Perceptual metric 全表(PSNR/SSIM/LPIPS,雙 GT)— 2026-06-13 補
