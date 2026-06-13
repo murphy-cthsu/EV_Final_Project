@@ -94,6 +94,62 @@ photo+silh+ARAP 就能找到動作)。
 - overfit gap:lego ours +5.95(去噪)vs hellwarrior ours −1.80(fit 噪音)——
   變號結論在 perceptual 協議下成立。
 
+## 3.5 嘗試 refine 重建:reliability-weighted supervision(2026-06-13)
+
+> 目標:讓 hellwarrior 重建追平 lego。**唯一對症的方法槓桿** —— 既然瓶頸是
+> SV4D 偏軸噪音(§2),就用診斷結果反過來加權監督信任(poster takeaway #1
+> 的直接實作):per-view photometric 信任 = exp(−β·(az_dist/180 + 0.5·elev/30)),
+> 壓低偏軸噪聲視角,讓 part-rigid 剛性結構從可靠視角外推。旗標
+> `--view_reliability_beta`(+`--view_reliability_on_silh`)。
+
+| 變體 | mean PSNR vs clean | Δ vs control | 備註 |
+|---|---:|---:|---|
+| control | 13.51 | — | |
+| β=1.5(photo) | 13.82 | +0.31 | |
+| β=3(photo) | 13.92 | +0.41 | |
+| **β=5(photo)** | **13.97** | **+0.46** | 最佳,已飽和 |
+| β=3 + silhouette 也加權 | 13.62 | +0.11 | silhouette 是乾淨幾何錨,壓它反而傷 |
+| β=3 + 強時間平滑 | 13.91 | +0.40 | flicker 在監督裡不在模型抖動,平滑無增益 |
+
+**Per-azimuth 分解**(t 採樣 0/5/10/15/20,`compare_hellwarrior_variants.py`):
+
+| az_dist | control | β=3 | β=5 |
+|---:|---:|---:|---:|
+| 0(input) | 15.25 | 15.83 | 15.91 |
+| 60 | 14.31 | 14.75 | 14.82 |
+| 90 | 13.14 | 13.53 | 13.56 |
+| 150 | 13.18 | 13.58 | 13.63 |
+| 180 | 14.39 | 14.74 | 14.81 |
+| **可靠錐(≤60)** | 14.11 | 14.59 | **14.68** |
+| **遠端(≥150)** | 13.59 | 13.96 | **14.03** |
+
+**判定(誠實):**
+- **方法原理被驗證**:壓低偏軸監督,平均反而**升** → 偏軸 SV4D 監督是**淨有害**
+  (模型在 fit 噪音);trust-by-view 是對的。這是 poster takeaway #1 第一次有
+  *重建端* 的實驗支撐(之前只是 loss 設計)。
+- **但增益飽和在 +0.5 dB,且幾乎均勻**(可靠錐 +0.57、遠端 +0.44)——
+  **不是「可靠錐追平 lego」的戲劇效果**。
+- **數據天花板才是 binding constraint**:floor 22.7(乾淨監督)vs 任何監督加權
+  能達到的 ~14.0 —— 缺的 8.7 dB 是 SV4D 影片裡**根本不存在的資訊**,任何
+  *方法*(mask/gate/MoE/ARAP/reliability/temporal)都救不回來。已窮舉測試。
+
+**結論:純方法無法讓 hellwarrior 看起來像 lego。** 視覺對比(下圖):β=5 比
+control 略乾淨(fuzz 稍收),但仍是模糊團,離 lego/clean GT 很遠。
+
+![](../../runs_aux/hellwarrior_variant_compare/variant_keyframes.png)
+
+![](../../runs_aux/hellwarrior_variant_compare/per_azimuth_psnr.png)
+
+**要真正得到 lego 級 articulated 重建,只有兩條路**(都不是改 method):
+1. **更乾淨的 generator**(SV4D 的 articulated flicker 是根因 → future work)。
+2. **自產場景**(jumpingjacks/standup 有乾淨 D-NeRF canonical,且我們控制生成)——
+   articulated 但監督可能較乾淨,是「articulated 也能重建」的最快候選。
+
+→ 對 poster:reliability-weighting 收進方法線當「診斷→重建閉環」的 +0.5 dB
+小證據(takeaway #1 落地),hellwarrior 的角色仍是 §3 的 supervision-damage 量測。
+
+---
+
 ### Oracle gap 的可視化(novel pose 軌道,poster 候選圖)
 
 相機沿 elev-0 ring 在 grid 之外的方位角 slerp(novel pose)、動作同步播放;
