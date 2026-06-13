@@ -24,6 +24,12 @@
 
 ![](../../runs_aux/spike_artifact_analysis.png)
 
+**★ 最戲劇的視覺證據**(standup,13 稀疏視角下 vanilla 爆炸;每列 SV4D | vanilla | ours):
+放射狀黑針從身體射出 = 上述「暗針沿視線、各向異性爆表」的直接顯影;ours 凍結
+canonical 保住身體結構(+8.4 dB)。比 hellwarrior 更清楚,**poster 機制圖首選**。
+
+![](../../runs_aux/standup_ours_vs_vanilla.png)
+
 **三條證據,層層收斂:**
 1. **極端針狀只在 noisy 出現**:vanilla 的各向異性 p95 = **1727**,乾淨 canonical 只有
    **64**(27× 差距)。中位數都 ~5(多數高斯正常)—— artifact 在**尾巴**,不是整體。
