@@ -96,7 +96,8 @@ def main():
         raw=np.array([np.mean(store[k]["raw"]) for k in ks]);return np.array(ks),Rv,Rc,raw
     from scipy.stats import spearmanr,pearsonr
     azk,aRv,aRc,araw=agg(baz); gap=aRv-aRc; pr,_=pearsonr(gap,araw); rho,_=spearmanr(gap,araw)
-    elk,eRv,eRc,eraw=agg(bel); egap=eRv-eRc; epr,_=pearsonr(egap,eraw)
+    elk,eRv,eRc,eraw=agg(bel); egap=eRv-eRc
+    epr=pearsonr(egap,eraw)[0] if len(elk)>=2 else float('nan')  # single-elevation scenes
     print(f"\n[{a.tag}] AZIMUTH:")
     print(f"{'az':>5} {'R_vgm':>8} {'R_clean':>8} {'gap':>8} {'raw':>8}")
     for k,rv,rc,g_,r in zip(azk,aRv,aRc,gap,araw): print(f"{k:>5.0f} {rv:>8.4f} {rc:>8.4f} {g_:>8.4f} {r:>8.4f}")

@@ -99,6 +99,8 @@ def main():
             entry = {
                 "file_path": f"./{'test' if is_test else 'train'}/r_{flat:05d}",
                 "view_idx": vi, "frame_idx": t, "azimuth_offset_deg": az,
+                "view_tag": tag, "azimuth_deg": az,
+                "elevation_deg": fm.get("elevation_offset_deg", 0.0),
                 "transform_matrix": tmat, "time": round(t / (T - 1), 4),
             }
             (test_frames if is_test else train_frames).append(entry)
