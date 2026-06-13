@@ -16,13 +16,18 @@
 
 ## A2. vs vanilla SC-GS(joint baseline,與 lego 對稱)
 
-每列:SV4D | clean GT | vanilla SC-GS(12.7 dB,煙霧塗抹但 57 視角不爆) | ours(13.5 dB)。
+每列:SV4D | clean GT | vanilla SC-GS(12.7 dB,煙霧塗抹) | ours(13.5 dB)。
 gap 只有 +0.83 dB(lego_v2 是 +8.9)→ 監督噪音壓過 method 選擇。
 
 ![](../../runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_keyframes.png)
 
+vanilla vs 自己的 SV4D 監督(held-out 時刻):身體輪廓在、非全崩,但仍模糊 ~13.5 dB。
+
+![](../../runs_aux/hellwarrior_vanilla_compare/vanilla_fits_sv4d_heldout.png)
+
 - GIF:`runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_v0.gif`
-- 腳本:`scripts/render_hw_vanilla_compare.py`
+- 腳本:`scripts/render_hw_vanilla_compare.py`、`render_hw_vanilla_vs_sv4d.py`
+- ⚠️ SC-GS 內部 log 的 "Best PSNR 25.46" 不可比(不同 eval 路徑),以一致管線數字為準
 
 ## B. Oracle gap(supervision damage,★poster 主打)
 
