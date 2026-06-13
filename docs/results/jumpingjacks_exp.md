@@ -59,6 +59,10 @@ Novel view(非訓練視角,相機在 grid 方位之間插值;vanilla | ours):
 
 ![](../../runs_aux/scene_videos/jumpingjacks_novel.gif)
 
+訓練曲線(8000 iters;loss 抖動因每步隨機抽 view/t,silhouette 主導):
+
+![](../../runs_aux/train_curve_jumpingjacks.png)
+
 **重要(打破純視角數趨勢)**:jumpingjacks(9 視角、**乾淨監督**)vanilla 只 +2.65、
 沒爆;但 standup(13 視角、近似相機)vanilla 爆到 +8.43。→ **vanilla 是否爆炸不是
 單看視角數,而是視角數 × 監督一致性 × 相機精度**。ours 的優勢 = 避開黑尖刺失效模式

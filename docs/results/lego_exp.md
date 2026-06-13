@@ -116,6 +116,10 @@ F2 的價值是展示「凍結 + 無結構動作」的失敗型態。
 
 ![](../../runs_aux/scene_videos/lego_v2_novel.gif)
 
+訓練曲線(8000 iters;loss 抖動因每步隨機抽 view/t):
+
+![](../../runs_aux/train_curve_lego.png)
+
 ---
 
 ## 2.5 Perceptual metric 全表(PSNR/SSIM/LPIPS,雙 GT)— 2026-06-13 補
