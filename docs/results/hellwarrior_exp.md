@@ -51,6 +51,43 @@ photo+silh+ARAP 就能找到動作)。
 
 ---
 
+## 2.7 vs vanilla SC-GS(joint)— 與 lego 對稱的 baseline,但結論相反且重要
+
+> 補上 lego 有、hellwarrior 缺的 vanilla 對照。同 SC-GS 配方(joint、512 nodes、
+> 16M deform-MLP、20k iters)訓在 hellwarrior 的 57 視角 SV4D 監督。
+> 腳本:`scripts/render_hw_vanilla_compare.py`。
+
+| 場景 / baseline | vanilla SC-GS vs clean | ours vs clean | Δ(ours−vanilla) |
+|---|---:|---:|---:|
+| **lego_v2(5 視角,rigid)** | 11.43(幾何爆炸) | 20.35 | **+8.9** |
+| **hellwarrior(57 視角,articulated)** | **12.68** | 13.51 | **+0.83** |
+
+**關鍵:hellwarrior 的 vanilla 沒有爆炸**(vs-SV4D held-out-time 還有 25.5 dB) ——
+57 視角的多視角約束遠多於 lego_v2 的 5 視角,joint 優化不會崩。視覺上(下圖)
+vanilla 是發散的煙霧狀塗抹、ours 因凍結結構更貼身體輪廓,但**兩者都遠離 clean GT**。
+
+![](../../runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_keyframes.png)
+
+(每列:SV4D 監督 | clean d-3dgs GT | vanilla SC-GS | ours。GIF:
+`runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_v0.gif`)
+
+**讀法(誠實,且強化中心論點):**
+- **方法優勢隨監督噪音增大而縮小**:rigid+欠約束(lego_v2)method 差 +8.9 dB;
+  articulated+多視角(hellwarrior)只差 +0.83 dB。
+- **原因正是 oracle gap**:hellwarrior 的瓶頸是監督噪音(§3 floor 22.7),
+  vanilla 與 ours **撞同一道數據天花板**(12.7 / 13.5,都遠低於 22.7)。
+  vanilla 把噪音 fit 進幾何(vs-SV4D 25.5、vs-clean 12.7 = 過擬合噪音);
+  ours 用凍結結構去噪一點(+0.83),但噪音上限壓過一切。
+- **這不是 hellwarrior 重建方法失敗,而是 pivot 的正當性證據**:當監督夠髒,
+  「換更好的 reconstructor」收益趨近於零 → 該做的是**診斷 generator**,
+  不是繼續刷重建。method-advantage 隨噪音衰減本身 = 又一個 supervision-damage 訊號。
+
+**Caveat**:lego 的 11.43 來自 5 視角 lego_v2;與 hellwarrior 57 視角不是同視角數。
+嚴格 apples-to-apples 需在 lego_v3(57 視角)也跑 vanilla(預期同樣不爆、gap 縮小)——
+但跨視角數的對照本身就是論點(視角數 × 噪音 共同決定 method 重不重要)。
+
+---
+
 ## 3. Oracle gap:重建失敗變成第四個診斷儀器(poster 主打)
 
 同一管線、同一 oracle 協議(ours 訓在乾淨參考 = floor/ceiling),per-scene 一個 scalar:

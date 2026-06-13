@@ -14,6 +14,16 @@
 - 逐視角動畫:`runs_aux/hellwarrior_gallery/gallery_v{00,07,14,28}.gif`
 - 腳本:`scripts/render_hellwarrior_gallery.py`
 
+## A2. vs vanilla SC-GS(joint baseline,與 lego 對稱)
+
+每列:SV4D | clean GT | vanilla SC-GS(12.7 dB,煙霧塗抹但 57 視角不爆) | ours(13.5 dB)。
+gap 只有 +0.83 dB(lego_v2 是 +8.9)→ 監督噪音壓過 method 選擇。
+
+![](../../runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_keyframes.png)
+
+- GIF:`runs_aux/hellwarrior_vanilla_compare/vanilla_vs_ours_v0.gif`
+- 腳本:`scripts/render_hw_vanilla_compare.py`
+
 ## B. Oracle gap(supervision damage,★poster 主打)
 
 Novel-pose 軌道:左 = floor(乾淨監督 22.7 dB)、右 = ours(SV4D 13.5 dB)。
