@@ -38,6 +38,38 @@
 
 ---
 
+## 1.5 方法 component ablation(我們特別設計的部件,各貢獻多少)
+
+我們的方法 = **凍結乾淨 canonical + part-rigid 動作模組**。逐個 component(全在 lego_v2 上做):
+
+| # | Component(設計部件) | 做什麼 / 為什麼 | 貢獻 |
+|---|---|---|---|
+| A | **凍結乾淨 canonical**(Stage A) | 結構 `requires_grad=False`,噪音無法吸進幾何 → 解耦 | **最大單一貢獻**(vanilla 11.43 → 15.91 靜態,+4.5) |
+| B | **Motion mask + part 投票**(Stage B/C) | 時間變異 + Otsu + 多視角投票 → arm/body 二分,只讓動的部位動 | 限制動作 DOF(防止 body 吸噪) |
+| C | **K=100 cluster SE(3) + LBS**(Stage E 核心) | arm 高斯 K-means 100 群,每群 per-time 剛體 SE(3);LBS top-6 軟混合 | K sweep 甜蜜點(K=10→100 +0.69;K=200/300 反而過擬合噪音) |
+| D | **Smart-photo loss**(VGM 信心加權) | `w=exp(−α·\|SV4D−canon\|)`,不一致像素權重→0 濾掉 hallucination | **+1.42**(最大 loss 機制) |
+| E | **Per-time per-cluster scale** | 每群每時刻 3D scale,修 canonical 形狀掃動時的 streaking | +0.22 |
+| F | **Per-Gaussian XYZ residual** | cluster SE(3) 是剛體;residual 給連續非剛性微修(重正則防過擬合) | **+0.44**(motion module 內最大單機制) |
+| G | Stage D 軌跡 init(DLT) | 質心三角化當 SE(3) 平移 init | 可選(hellwarrior/lego 拔掉無損,見各 exp) |
+| — | ~~Per-Gaussian rot residual~~ | 試過每高斯旋轉殘差 | **+0.04 → 拒絕**(誠實負結果) |
+
+累積階梯(左)+ 各機制單獨貢獻(右,含被拒絕的 rot-residual):
+
+![](../../runs_aux/component_ablation.png)
+
+視覺進展(SV4D | clean GT | K=1 單剛體 | K=100+LBS+smart | +xyz residual 全配;
+手臂從僵硬剛體 → 多群關節 → 連續微修,愈來愈貼 GT):
+
+![](../../runs_aux/component_ablation_visual.png)
+
+**讀法:**
+- **凍結 canonical 是骨幹**(+4.5,最大跳),其餘是動作模組的精修。
+- **贏在 inductive bias 不是 DOF**:同 canonical 換 16M deform-MLP(F2)= 11.89,
+  我們 885K = 20.03 → 結構化 SE(3)+LBS 才是關鍵(見 §2 canonical 2×2 排除實驗)。
+- **誠實負結果**:rot-residual(+0.04)、更鬆的 xyz_res 正則(−0.19)都試過並拒絕。
+
+---
+
 ## 2. 訓練視角:region-decomposed PSNR(「贏在底板?」的定量回答)
 
 全幀 PSNR 有區域效應:83% 像素是背景、底板只有我們有(從凍結 canonical 繼承,監督裡沒有)。同一組 mask 套所有模型,只算 mask 內像素:
