@@ -41,9 +41,11 @@ canonical 對 SV4D 前景 IoU = 0.30(~hellwarrior 0.28 水準,可拟合吸收)�
 | **standup** | **13** | **9.54(爆炸)** | **17.97** | **+8.43** |
 | hellwarrior | 57 | 13.68 | 15.31 | +1.63 |
 
-**method 優勢隨視角稀疏度遞增**:5/13 視角約束不足 → vanilla 幾何爆炸、ours
-(凍結 canonical)存活 → +8.4~8.9 dB;57 視角約束足 → vanilla 不爆 → +1.6 dB。
-→ 這把「lego 贏很多、hellwarrior 幾乎沒贏」的矛盾**解釋清楚:是視角數,不是物類**。
+**⚠️ 修正(jumpingjacks 後)**:原本想說「method 優勢隨視角稀疏度遞增」,但
+jumpingjacks(9 視角、乾淨監督)vanilla 只 +2.65 沒爆,打破純視角數趨勢。
+正確說法:**vanilla 是否爆炸 = 視角數 × 監督一致性 × 相機精度**。standup 爆(+8.43)
+是「13 視角 + 近似相機(復用 lego_v3,無原生 metadata)」共同所致 —— 相機不準本身
+就會讓監督不一致 → vanilla 爆。ours 優勢 = 避開黑尖刺失效模式,在 vanilla 會爆時最大。
 
 ![](../../runs_aux/standup_ours_vs_vanilla.png)
 

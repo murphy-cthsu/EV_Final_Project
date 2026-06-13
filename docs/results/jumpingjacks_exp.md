@@ -32,7 +32,31 @@
 場景。**證明「articulated → 重建崩」不是必然**:hellwarrior 崩(13.5)是因為它的 SV4D
 監督噪音大,不是因為 articulated 本身。失敗是**內容依賴**的。
 
-(ours vs vanilla 重建對比:vanilla 訓練中,待補。)
+3 欄 gallery(SV4D | clean d-3dgs GT | ours;身體姿勢正確,僅快速運動的手臂有 fuzz):
+
+![](../../runs_aux/jumpingjacks_gallery.png)
+
+動態(21 幀跳躍動作,SV4D | clean GT | ours):
+
+![](../../runs_aux/jumpingjacks_v0.gif)
+
+![](../../runs_aux/jumpingjacks_v4.gif)
+
+### ours vs vanilla(誠實:乾淨監督下 vanilla 沒爆,優勢縮小)
+
+| 方法 | vs clean | 備註 |
+|---|---:|---|
+| vanilla SC-GS | 18.38 | **大致完整**(非崩塌),僅頭部局部黑尖刺 + fuzz |
+| **ours** | **21.03** | +2.65;凍結結構避開尖刺 |
+
+![](../../runs_aux/jumpingjacks_ours_vs_vanilla.png)
+
+**重要(打破純視角數趨勢)**:jumpingjacks(9 視角、**乾淨監督**)vanilla 只 +2.65、
+沒爆;但 standup(13 視角、近似相機)vanilla 爆到 +8.43。→ **vanilla 是否爆炸不是
+單看視角數,而是視角數 × 監督一致性 × 相機精度**。ours 的優勢 = 避開黑尖刺失效模式
+(凍結結構),**這在 vanilla 會爆時最大**(lego +8.9、standup +8.4),監督乾淨時縮小
+(jumpingjacks +2.65、hellwarrior +0.83)。誠實措辭:ours ≥ vanilla 全部場景,差距
+隨「監督越稀疏/越不一致」放大。
 
 ---
 
@@ -50,6 +74,11 @@
   hellwarrior(多肢複雜、大 pose change)到 9.2。
 - → oracle gap 不只是「rigid vs articulated」二分,而是**隨運動複雜度連續增長**的
   supervision-damage 量尺。三點成趨勢,不再是單點軼事。
+
+左:jumpingjacks probe cone(gap=R_vgm−R_clean 追 reference,ρ=0.83);
+右:oracle gap 三場景趨勢(0.6 < 3.6 < 9.2 dB)。
+
+![](../../runs_aux/jumpingjacks_probe_and_oraclegap.png)
 
 ---
 
