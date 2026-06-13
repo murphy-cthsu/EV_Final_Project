@@ -203,6 +203,15 @@ def main():
                         "(likely VGM artifacts).")
     p.add_argument("--photo_smart_alpha", type=float, default=8.0,
                    help="Filter sharpness for smart photometric")
+    p.add_argument("--view_reliability_beta", type=float, default=0.0,
+                   help="Cone-weighted supervision (poster takeaway #1): per-view "
+                        "photometric trust = exp(-beta*(az_dist/180 + 0.5*elev/30)). "
+                        "0 = uniform (current). >0 down-weights off-axis noisy views so "
+                        "the part-rigid prior extrapolates them from reliable views. "
+                        "Attacks the SV4D-noise bottleneck (oracle gap), not model capacity.")
+    p.add_argument("--view_reliability_on_silh", action="store_true",
+                   help="Also apply the reliability weight to the silhouette loss "
+                        "(off-axis alpha drifts too on hellwarrior). Default: photo only.")
     p.add_argument("--v5_render_dir", type=str,
                    default="outputs/custom/scene00_v5_node/train/ours_30000/renders",
                    help="Per-(view, time) renders from the fits-all v5 canonical (§3) "
@@ -537,6 +546,23 @@ def main():
               f"(mean weight={avg_weight:.3f}, low = filtered-as-artifact; "
               f"motion-gated={args.motion_gated_smart_photo})")
 
+    # ===== Per-frame view-reliability weight (cone-weighted supervision) =====
+    # Implements poster takeaway #1: trust views by their position in the
+    # reliability cone. Off-axis = noisy (SV4D's failure axis) -> low weight ->
+    # the part-rigid prior fills them in from reliable near-input views.
+    view_rel_w = torch.ones(len(cams), device=args.device)
+    if args.view_reliability_beta > 0:
+        for i, f in enumerate(data["frames"]):
+            az = float(f.get("azimuth_deg", 0.0)) % 360.0
+            az_dist = min(az, 360.0 - az) / 180.0           # [0,1]
+            el = abs(float(f.get("elevation_deg", 0.0))) / 30.0  # [0,1]
+            view_rel_w[i] = float(np.exp(-args.view_reliability_beta * (az_dist + 0.5 * el)))
+        uniq = {}
+        for i, f in enumerate(data["frames"]):
+            uniq[float(f.get("azimuth_deg", 0.0))] = float(view_rel_w[i])
+        print(f"[hier] view-reliability (beta={args.view_reliability_beta}): "
+              f"az->weight " + ", ".join(f"{a:.0f}:{w:.2f}" for a, w in sorted(uniq.items())))
+
     print(f"[hier] training {args.iterations} iters with {len(cams)} cameras")
     t0 = time.time()
     arm_mask_t = arm_w_global_t > 0.5  # use canonical arm-mask for ARAP
@@ -627,6 +653,8 @@ def main():
         alpha = pkg["alpha"]
         gt_alpha = gt_alphas[idx]
         L_silh = silhouette_loss(alpha[0], gt_alpha, outside_weight=args.silh_outside_weight)
+        if args.view_reliability_on_silh:
+            L_silh = L_silh * view_rel_w[idx]
 
         # Trajectory loss: cluster-union centroid tracks Stage D target
         # (per motion part when multi-part Stage D is available)
@@ -709,6 +737,7 @@ def main():
             fg_w = w_pix * gt_alpha                                   # (H, W)
             err = (img - gt_rgb).abs().mean(dim=0)                    # (H, W)
             L_photo_smart = (err * fg_w).sum() / fg_w.sum().clamp(min=1)
+            L_photo_smart = L_photo_smart * view_rel_w[idx]
 
         # LPIPS perceptual loss (alex backbone, robust to small offsets + sharpens edges)
         L_lpips = torch.tensor(0.0, device=args.device)
