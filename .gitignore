@@ -54,3 +54,16 @@ wandb/
 lego.zip
 meetTW_checkpoint_0601/
 .claude/
+
+# Data archives & point clouds (regenerable / large, keep out of git)
+*.zip
+*.ply
+/lego_fixed/
+/motion_classification/
+/jumpingjacks_splitting/
+scene_point_cloud.ply
+
+# Poster / scratch binaries (root-level only; docs/*.png stay tracked)
+/poster.pptx.pdf
+/poster_temp.png
+/ntu.png
