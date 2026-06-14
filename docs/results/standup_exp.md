@@ -74,6 +74,33 @@ mask 幾乎覆蓋整個工人(與 lego 單一鏟斗臂、hellwarrior 多肢的 m
 
 ![](../../runs_aux/stageBC_standup.png)
 
+## A2.6 All-motion ablation:噪聲監督下 gate 效果被淹沒
+
+把 static/motion gate **全開**(28,804 顆全可動):
+
+| 變體 | motion 占比 | vs clean | vs SV4D |
+|---|---|---:|---:|
+| ours(正常,有 static body) | 73% | 16.71 | 17.13 |
+| **allmove(gate 全開)** | **100%** | **16.74** | 17.22 |
+
+**allmove ≈ ours(+0.03,視覺也相似)。** 與 jumpingjacks(allmove +0.26,**乾淨**監督下
+gate 效果可見)對比 → **gate 的(微)效果隨監督噪音增大而被淹沒**:standup 16.7 ≪ floor 24.74,
+兩變體都被 supervision-noise 的 fuzz 主導,+0.03 的差被噪音蓋過。三場景一致:
+
+| 場景 | 監督 | allmove − ours |
+|---|---|---:|
+| jumpingjacks | 乾淨(21 dB) | **+0.26**(可見) |
+| standup | 噪聲(16.7 dB) | +0.03(淹沒) |
+| hellwarrior | 重噪聲(13.5 dB) | −0.13(淹沒) |
+
+→ 呼應全篇主軸:**監督噪音壓過一切方法選擇**(gate 也是)。靜態 + 動畫(clean | ours | allmove):
+
+![](../../runs_aux/standup_ours_vs_allmove.png)
+
+![](../../runs_aux/scene_videos/standup_ours_vs_allmove.gif)
+
+模型:`outputs/custom/partrigid_standup_allmove`。
+
 ## A3. ★ Oracle gap 四場景趨勢(n=4,3 個 articulated)
 
 | 場景 | 類型 | oracle(floor) | ours | **oracle gap** |
