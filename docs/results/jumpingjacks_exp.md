@@ -81,14 +81,14 @@ Novel view(非訓練視角,相機在 grid 方位之間插值;vanilla | ours):
 | hellwarrior | articulated(複雜) | 22.74 | 13.51 | **9.2 dB** |
 
 **精緻化的結論(比之前 n=1 強得多):**
-- articulated 確實比 rigid 受更多 supervision damage(3.6, 9.2 ≫ 0.6) ✓
+- articulated 確實比 rigid 受更多 supervision damage(3.6, 8.0, 9.2 ≫ 0.6) ✓
 - 但 articulated 的**量級內容依賴**:jumpingjacks(週期性、對稱、簡單運動)只 3.6,
   hellwarrior(多肢複雜、大 pose change)到 9.2。
 - → oracle gap 不只是「rigid vs articulated」二分,而是**隨運動複雜度連續增長**的
   supervision-damage 量尺。三點成趨勢,不再是單點軼事。
 
 左:jumpingjacks probe cone(gap=R_vgm−R_clean 追 reference,ρ=0.83);
-右:oracle gap 三場景趨勢(0.6 < 3.6 < 9.2 dB)。
+右:oracle gap 趨勢(standup 8.0 加入後 0.6 < 3.6 < 8.0 < 9.2,見 standup_exp)。
 
 ![](../../runs_aux/jumpingjacks_probe_and_oraclegap.png)
 

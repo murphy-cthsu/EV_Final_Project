@@ -49,9 +49,9 @@ supervision-damage(oracle gap)互相印證。
 **C2 經驗發現:SV4D 2.0 的失效結構。**
 (a) 空間可靠錐(input 37.5 → 偏軸 19.4 dB,−0.77 dB/10° elev);
 (b) 物類相依失效:rigid → 空間崩;articulated → 時間 flicker 主導;
-(c) **oracle gap = supervision damage,隨運動複雜度連續增長**(n=3):
-rigid 0.6 dB(lego)< articulated 週期 3.6 dB(jumpingjacks)< articulated 複雜 9.2 dB
-(hellwarrior)—— articulated 受更多傷,但量級內容依賴(不是物類二分)。
+(c) **oracle gap = supervision damage,隨運動複雜度連續增長**(n=4,3 個 articulated):
+rigid 0.6 dB(lego)< articulated 週期 3.6(jumpingjacks)< 蹲→站 8.0(standup)
+< 複雜多肢 9.2(hellwarrior)—— articulated 受更多傷,連續增長非物類二分。
 
 **C3 機制解釋:黑色尖刺 = 多視角不一致的幾何形體。**
 同物體控制實驗:noisy 監督下高斯各向異性 p95=1727(乾淨 64),且 needle 只在 noisy
@@ -113,14 +113,14 @@ Multi-View Video Diffusion Inconsistency*
 ## 6. 誠實 limitations(主動寫,反而加分)
 - 單一 generator(SV4D 2.0);cross-generator 是 future work。
 - 3 個完整場景(lego rigid + jumpingjacks/hellwarrior articulated);oracle gap
-  趨勢 n=3、probe 驗證 n=3。cross-generator 仍是 future work。
+  趨勢 n=4(3 articulated)、probe 驗證 n=3。cross-generator 仍是 future work。
 - 診斷相關 n=9 視角 bin,ρ 0.67–0.88(中強)。
 - 需要乾淨靜態 canonical(一次掃描);probe 對它的品質有依賴。
 
 ---
 
 ## 7. 最划算的補強(若要再強一點,按 CP 值)
-1. ✅ **已完成(jumpingjacks)**:oracle gap 趨勢 n=3、probe 驗證 n=3。第三個 articulated
+1. ✅ **已完成(jumpingjacks + standup)**:oracle gap 趨勢 n=4(0.6/3.6/8.0/9.2)、probe 驗證 n=3。第三個 articulated
    (trex/mutant)可選,進一步密集化趨勢。
 2. **bouncingballs**(rigid 平移)→ oracle-gap 趨勢第三點(平移<旋轉<articulated),且可能給乾淨 demo。
 3. **per-part fit-residual** → 「哪條肢體最不一致」,診斷粒度升級(便宜)。
