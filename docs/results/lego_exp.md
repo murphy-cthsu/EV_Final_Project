@@ -67,12 +67,18 @@ jumpingjacks(全身動,粗糙):紅區大且溢出輪廓 —— mask 明顯粗:
 
 ![](../../runs_aux/stageBC_jumpingjacks.png)
 
-**這真的有用嗎?(誠實)** mask 很粗,但**精度不重要** —— hellwarrior 的 allmove 實驗
-(gate 全開、等於不要 mask)= 13.38 vs 用 mask 13.51,幾乎一樣。mask 的**真正功能**
-不是精確分割,而是當 **smart-photo 的開關**:smart-photo 拿靜態 canonical 當參考,
-若對動的像素也濾波,動區永遠跟靜態 canonical 不一致 → 權重→0 → **動作學不到**;
-mask 只需粗略二元「這塊動不動」來決定動區關掉濾波。→ **B 是讓 D(smart-photo)能用的
-輔助件,不是 +dB 主力**(主力是 A 凍結 canonical + D smart-photo)。
+**這真的有用嗎?(誠實,2026-06-14 修正)** 先前寫「mask 精度不重要」是**過度宣稱**:
+hellwarrior allmove(gate 全開=不要 mask)= 13.38 ≈ 用 mask 13.51,只證明
+「**當前 mask ≈ 沒 mask**」,**無法**區分「精度不重要」vs「當前 mask 太爛、爛到跟沒有
+一樣」。而且 allmove 只改了 Stage C 的 part assignment,**沒碰** smart-photo 的 gating
+mask(訓練時另外從 SV4D 重算)—— 會「誤導」的恰恰是後者。
+**正確的立場**:mask 品質要**夠好**,否則有 mask 反而誤導;不是「mask 不重要」。
+要回答這個需要 sweep mask 品質(更好 / 當前 / 更差 / 無),見下方 §1.6 mask-quality ablation。
+
+mask 的**功能**(這部分仍成立):當 **smart-photo 的開關** —— smart-photo 拿靜態
+canonical 當參考,若對動的像素也濾波,動區永遠跟靜態 canonical 不一致 → 權重→0 →
+**動作學不到**;mask 決定動區關掉濾波。所以 mask **錯**會直接傷 smart-photo(動區
+該關沒關 / 不該關卻關)。
 
 累積階梯(左)+ 各機制單獨貢獻(右,含被拒絕的 rot-residual):
 
