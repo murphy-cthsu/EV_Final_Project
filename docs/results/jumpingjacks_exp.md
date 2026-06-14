@@ -121,6 +121,35 @@ arm(紅)/body(灰)多視角投票。jumpingjacks 全身週期動 → mask 覆蓋
 
 (mask 粗不影響本場景重建 21 dB —— 監督乾淨時 photo loss 主導;見 lego_exp §1.5 的誠實討論。)
 
+## 4.6 ★ All-motion ablation:全身動的場景,static gate 反而拖累
+
+把 Stage B/C 的 static/motion gate **全開**(所有 31,881 顆高斯都可動,無 static body):
+
+| 變體 | motion 占比 | vs clean | vs SV4D |
+|---|---|---:|---:|
+| ours(正常,有 static body) | 67% | 21.03 | — |
+| **allmove(gate 全開)** | **100%** | **21.29** | 23.60 |
+
+**allmove 略好 +0.26 dB(平均),且視覺上明顯更乾淨。** 與 hellwarrior 一致
+(allmove 13.38 ≈ ctrl 13.51)→ **全身 articulated 場景,static gate 不是 binding constraint,
+甚至拖累**。原因:跳躍是**全身動**(軀幹彈跳),gate 把 33% 高斯判成 static 強制不動 →
+那些本該跟著彈跳的高斯被釘住 → 拖影。
+
+靜態對照(clean GT | ours 67% | allmove 100%;t=10 手臂張開幀,allmove 領先最大):
+
+![](../../runs_aux/jj_ours_vs_allmove.png)
+
+動畫(21 幀):差距**姿勢相關** —— t=4(手放下、近 canonical)兩者≈;t=10(手張到最開、
+離 canonical 最遠)allmove 大勝。印證「強制 static 的傷害在身體離 canonical 姿勢最遠時最大」:
+
+![](../../runs_aux/scene_videos/jj_ours_vs_allmove.gif)
+
+**對「mask 有沒有用」的淨貢獻**(接 lego_exp §1.5):
+- **全身動**(jumpingjacks/hellwarrior):gate ≈ 無 gate(甚至略差)→ body 真的整個在動。
+- **rigid + 大片靜態**(lego:單鏟斗臂 + 靜止車身/底板):gate 應該才有用(body 真的該靜;待 lego allmove 確認)。
+→ **正確立場不是「mask 無用」,而是「mask 的價值取決於場景有多少真正靜止的結構」。**
+模型:`outputs/custom/partrigid_jumpingjacks_allmove`。
+
 ## 5. 對 framing 的淨貢獻
 
 jumpingjacks 一次補強三個之前的弱點:
