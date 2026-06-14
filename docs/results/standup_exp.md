@@ -42,6 +42,14 @@ lego(5 視角)構成視角數光譜。
 
 ![](../../runs_aux/scene_videos/standup_novel.gif)
 
+## A2.5 Stage B/C motion mask 可視化
+
+Row1 = Stage B motion mask(紅=動,時間標準差 + Otsu);Row2 = Stage C per-Gaussian
+arm(紅)/body(灰)多視角投票。standup 蹲→站**全身動** → arm 高斯佔 **73.4%**,
+mask 幾乎覆蓋整個工人(與 lego 單一鏟斗臂、hellwarrior 多肢的 mask 形成對比):
+
+![](../../runs_aux/stageBC_standup.png)
+
 ## A3. ★ Oracle gap 四場景趨勢(n=4,3 個 articulated)
 
 | 場景 | 類型 | oracle(floor) | ours | **oracle gap** |

@@ -111,6 +111,16 @@ standup 無 floor → 純 R_vgm 反向(ρ=−0.82)。**有參考校準時 probe 
 
 ---
 
+## 4.5 Stage B/C motion mask 可視化
+
+Row1 = Stage B motion mask(紅=動,時間標準差 + Otsu);Row2 = Stage C per-Gaussian
+arm(紅)/body(灰)多視角投票。jumpingjacks 全身週期動 → mask 覆蓋大半身體、溢出輪廓
+(粗),與 lego 單一鏟斗臂的乾淨 mask 對比鮮明:
+
+![](../../runs_aux/stageBC_jumpingjacks.png)
+
+(mask 粗不影響本場景重建 21 dB —— 監督乾淨時 photo loss 主導;見 lego_exp §1.5 的誠實討論。)
+
 ## 5. 對 framing 的淨貢獻
 
 jumpingjacks 一次補強三個之前的弱點:
