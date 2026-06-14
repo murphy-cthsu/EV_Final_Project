@@ -53,6 +53,10 @@ lego(5 視角)構成視角數光譜。
 
 ![](../../runs_aux/standup_8k_vs_16k.png)
 
+動畫(clean GT | ours 8k | ours 16k,21 幀):整段動作兩者跟得一樣,逐幀 PSNR 互有高低:
+
+![](../../runs_aux/scene_videos/standup_8k_vs_16k.gif)
+
 訓練曲線(raw 分量,per-iter 隨機抽視角 → total 震盪大;smart-photo/silhouette 前
 ~2000 iter 下降後進平台):
 
