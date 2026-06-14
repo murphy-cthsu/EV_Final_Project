@@ -48,6 +48,11 @@ lego(5 視角)構成視角數光譜。
 → **8000 已基本收斂,非 under-train**;瓶頸是數據天花板(floor 24.74)不是迭代數。
 所有場景同協議 8000 iters。
 
+視覺對照(clean GT | ours 8k | ours 16k)—— 兩者**幾乎一模一樣**,per-view PSNR 互有
+高低在噪聲內,無一致改善 → 收斂的視覺證據:
+
+![](../../runs_aux/standup_8k_vs_16k.png)
+
 訓練曲線(raw 分量,per-iter 隨機抽視角 → total 震盪大;smart-photo/silhouette 前
 ~2000 iter 下降後進平台):
 
