@@ -42,6 +42,21 @@ lego(5 視角)構成視角數光譜。
 
 ![](../../runs_aux/scene_videos/standup_novel.gif)
 
+## A2.4 收斂性:8000 iters 夠嗎?(直接檢驗)
+
+訓久一倍對照:**8k = 16.71 dB → 16k = 16.91 dB,翻倍迭代只 +0.20 dB**(噪聲內)。
+→ **8000 已基本收斂,非 under-train**;瓶頸是數據天花板(floor 24.74)不是迭代數。
+所有場景同協議 8000 iters。
+
+訓練曲線(raw 分量,per-iter 隨機抽視角 → total 震盪大;smart-photo/silhouette 前
+~2000 iter 下降後進平台):
+
+![](../../runs_aux/train_curve_standup.png)
+
+> 注:曲線是 **raw(未加權)** 值。smart-photo raw≈0.13 但權重 ×3 → 加權 0.39 ≈
+> silhouette 0.51,兩個數據項其實平衡。各 loss 的**貢獻**看 `lego_exp.md §1.5` ablation
+> (smart-photo +1.42、xyz_res +0.44…),不是看曲線大小。
+
 ## A2.5 Stage B/C motion mask 可視化
 
 Row1 = Stage B motion mask(紅=動,時間標準差 + Otsu);Row2 = Stage C per-Gaussian
