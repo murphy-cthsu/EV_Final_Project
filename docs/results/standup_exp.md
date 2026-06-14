@@ -36,6 +36,12 @@ lego(5 視角)構成視角數光譜。
 比 hellwarrior 更戲劇 —— `spike_artifact_explanation.md` 量到的「暗針沿視線、
 各向異性 p95=1727」的最佳視覺顯影,**poster 黑尖刺機制圖首選**。ours 凍結結構保住工人身體。)
 
+動態(SV4D | vanilla 黑針爆炸 | ours,21 幀)+ novel-view orbit(vanilla | ours),與其他 class 同格式:
+
+![](../../runs_aux/scene_videos/standup_compare_v0.gif)
+
+![](../../runs_aux/scene_videos/standup_novel.gif)
+
 ## A3. ★ Oracle gap 四場景趨勢(n=4,3 個 articulated)
 
 | 場景 | 類型 | oracle(floor) | ours | **oracle gap** |
