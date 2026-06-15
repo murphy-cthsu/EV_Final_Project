@@ -23,12 +23,12 @@ env/
 third_party/SC-GS/
 third_party/AnySplat/
 third_party/Wan2.2/
-third_party/generative-models/
 third_party/sam2/
+# generative-models + Deformable-3D-Gaussians: source tracked, artifacts ignored below
 
 # Data, weights, outputs (paths may be symlinks → match w/o trailing slash)
-data
-data/
+/data
+/data/
 checkpoints/
 outputs
 outputs/
@@ -38,13 +38,67 @@ runs_aux/
 wandb/
 *.ckpt
 *.pth
+*.pt
 *.safetensors
+*.bin
+*.npz
+*.mp4
+*.gif
+
+# ── generative-models (third_party/generative-models or ./generative-models) ──
+# Model weights & training artifacts
+**/generative-models/checkpoints/
+**/generative-models/logs/
+**/generative-models/wandb/
+**/generative-models/.data/
+**/generative-models/sgm/modules/autoencoding/lpips/loss/vgg.pth
+**/generative-models/scripts/util/detection/*.npz
+# Inference outputs & demo/input media (not source)
+**/generative-models/outputs/
+**/generative-models/assets/
+**/generative-models/data/
+# Env / build / hub cache
+**/generative-models/.pt2/
+**/generative-models/.pt13/
+**/generative-models/.generativemodels/
+**/generative-models/build/
+**/generative-models/dist/
+**/generative-models/src/
+**/generative-models/**/.cache/huggingface/
+
+# ── Deformable-3D-Gaussians (third_party/… or ./Deformable-3D-Gaussians) ──
+# Trained models & experiment trees
+**/Deformable-3D-Gaussians/output/
+**/Deformable-3D-Gaussians/lego_fixed/
+**/Deformable-3D-Gaussians/jumpingjacks_splitting/
+**/Deformable-3D-Gaussians/**/point_cloud/
+**/Deformable-3D-Gaussians/**/deform/
+**/Deformable-3D-Gaussians/**/motion_classification/
+**/Deformable-3D-Gaussians/**/point_cloud_viz/
+**/Deformable-3D-Gaussians/**/camera_estimation_math*/
+**/Deformable-3D-Gaussians/**/d-3dgs_video/
+**/Deformable-3D-Gaussians/**/d-3dgs-video/
+# SV4D2 input videos & eval renders (keep assets/*.png README images)
+**/Deformable-3D-Gaussians/assets/sv4d2/
+**/Deformable-3D-Gaussians/assets/sv4d2_old/
+**/Deformable-3D-Gaussians/assets/results/
+**/Deformable-3D-Gaussians/**/renders/
+**/Deformable-3D-Gaussians/**/frames/
+**/Deformable-3D-Gaussians/**/gt/
+**/Deformable-3D-Gaussians/**/depth/
+# CUDA extension build artifacts
+**/Deformable-3D-Gaussians/submodules/**/build/
+**/Deformable-3D-Gaussians/submodules/**/*.egg-info/
+**/Deformable-3D-Gaussians/tensorboard_3d/
+**/Deformable-3D-Gaussians/screenshots/
+**/Deformable-3D-Gaussians/output/*.log
 
 # Editors
 .vscode/
 .idea/
 *.swp
 .DS_Store
+.cuda13_toolkit/
 
 # Local config
 .env
